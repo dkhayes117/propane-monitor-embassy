@@ -6,13 +6,14 @@ use defmt::{info, unwrap};
 use embassy_executor::Spawner;
 use embassy_nrf::gpio::{Flex, Level, Output, OutputDrive};
 use embassy_nrf::interrupt::{self, InterruptExt, Priority};
-use embassy_nrf::pwm::{Prescaler, SimplePwm};
+// use embassy_nrf::pwm::{Prescaler, SimplePwm};
 use embassy_nrf::saadc::{ChannelConfig, Config, Oversample, Saadc};
 use embassy_time::{Duration, Ticker, Timer};
+use futures::StreamExt;
 use nrf_modem::{ConnectionPreference, SystemMode};
 use nrf_modem::lte_link::LteLink;
 use propane_monitor_embassy as _;
-use propane_monitor_embassy::{Dtls, Payload, TankLevel};
+use propane_monitor_embassy::{Dtls, TankLevel};
 
 
 #[embassy_executor::main]
@@ -54,11 +55,10 @@ async fn run() {
     let mut p = embassy_nrf::init(Default::default());
 
     // Disable on-board sensors for low power
-    let mut pin_29 = Flex::new(p.P0_29);
-    pin_29.set_as_disconnected();
+    Flex::new(&mut p.P0_29).set_as_disconnected();
 
     // Create our sleep timer (time between sensor measurements)
-    let mut ticker = Ticker::new(Duration::from_secs(15));
+    let mut ticker = Ticker::every(Duration::from_secs(15));
 
     // Heapless buffer to hold our sample values before transmitting
     let mut tank_level = TankLevel::new();
@@ -89,8 +89,8 @@ async fn run() {
             nbiot_support: false,
             gnss_support: true,
             preference: ConnectionPreference::Lte,
-        })
-    ).await;
+        }).await
+    );
 
     // Create our LTE Link
     let link = LteLink::new().await.unwrap();
@@ -100,19 +100,19 @@ async fn run() {
         let mut buf = [0; 1];
 
         // Power up the hall sensor: max power on time = 330us
-        hall_effect.set_high().await;
+        hall_effect.set_high();
         Timer::after(Duration::from_micros(500)).await;
 
         adc.sample(&mut buf).await;
 
-        hall_effect.set_low().await;
+        hall_effect.set_low();
 
         tank_level.data.push(buf[0]).unwrap();
 
         // Our payload data buff is full, send to the cloud, clear the buffer, disconnect socket
-        if payload.data.is_full() {
-            dtls.transmit_payload(&tank_level).await;
-            payload.data.clear();
+        if tank_level.data.is_full() {
+            dtls.transmit_payload(&tank_level).unwrap().await;
+            tank_level.data.clear();
         }
 
         ticker.next().await; // wait for next tick event
