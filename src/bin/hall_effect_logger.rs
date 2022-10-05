@@ -6,7 +6,7 @@ use defmt::info;
 use embassy_executor::Spawner;
 use embassy_nrf::interrupt;
 use embassy_nrf::pwm::{Prescaler, SimplePwm};
-use embassy_nrf::saadc::{ChannelConfig, Config, Saadc};
+use embassy_nrf::saadc::{ChannelConfig, Config, Oversample, Saadc};
 use embassy_time::{Duration, Timer};
 use propane_monitor_embassy as _;
 
@@ -15,8 +15,8 @@ async fn main(_spawner: Spawner) {
     let mut p = embassy_nrf::init(Default::default());
     let mut pwm = SimplePwm::new_1ch(p.PWM0, p.P0_31);
 
-    let adc_config = Config::default();
-    adc_config.oversample();
+    let mut adc_config = Config::default();
+    adc_config.oversample = Oversample::OVER8X;
 
     let channel_config = ChannelConfig::single_ended(&mut p.P0_14);
     let mut adc = Saadc::new(
@@ -63,5 +63,4 @@ async fn main(_spawner: Spawner) {
         info!("Gauge Level: {}%, adc: {=i16}", level, &buf[0]);
     }
     propane_monitor_embassy::exit();
-}
 }
