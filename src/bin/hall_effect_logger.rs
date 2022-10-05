@@ -16,6 +16,8 @@ async fn main(_spawner: Spawner) {
     let mut pwm = SimplePwm::new_1ch(p.PWM0, p.P0_31);
 
     let adc_config = Config::default();
+    adc_config.oversample();
+
     let channel_config = ChannelConfig::single_ended(&mut p.P0_14);
     let mut adc = Saadc::new(
         p.SAADC,
@@ -57,14 +59,9 @@ async fn main(_spawner: Spawner) {
         pwm.set_duty(0, 2500 - *duty);
         Timer::after(Duration::from_millis(3000)).await;
 
-        let mut sum = 0;
-
-        for _ in 0..10 {
-            adc.sample(&mut buf).await;
-            sum += buf[0];
-            // info!("Gauge Level: {}%, adc: {=i16}", level, &buf[0]);
-        }
-        info!("Gauge Level: {}%, avg_adc: {=i16}", level, sum / 10);
+        adc.sample(&mut buf).await;
+        info!("Gauge Level: {}%, adc: {=i16}", level, &buf[0]);
     }
     propane_monitor_embassy::exit();
+}
 }
