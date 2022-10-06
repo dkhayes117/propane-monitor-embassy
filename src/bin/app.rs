@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
+
 use defmt::{info, unwrap};
 use embassy_executor::Spawner;
 use embassy_nrf::gpio::{Flex, Level, Output, OutputDrive};
@@ -91,10 +92,10 @@ async fn run() {
             preference: ConnectionPreference::Lte,
         }).await
     );
-
-    // Create our LTE Link
-    let link = LteLink::new().await.unwrap();
-    let mut dtls = Dtls::new();
+    //
+    // // Create our LTE Link
+    // let link = LteLink::new().await.unwrap();
+    // let mut dtls = Dtls::new();
 
     loop {
         let mut buf = [0; 1];
@@ -111,7 +112,10 @@ async fn run() {
 
         // Our payload data buff is full, send to the cloud, clear the buffer, disconnect socket
         if tank_level.data.is_full() {
-            dtls.transmit_payload(&tank_level).unwrap().await;
+            for val in &tank_level.data{
+                info!("{}", val);
+            }
+            // dtls.transmit_payload(&tank_level).unwrap().await;
             tank_level.data.clear();
         }
 

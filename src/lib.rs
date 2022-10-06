@@ -1,5 +1,6 @@
 #![no_main]
 #![no_std]
+#![feature(alloc_error_handler)]
 
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -66,28 +67,29 @@ impl Dtls {
             &[config::SECURITY_TAG]
         ).await.unwrap();
 
-        Ok( Self { socket } )
+        Ok(Self { socket })
     }
 
-    pub async fn transmit_payload<Endpoint>(&mut self, tank_level: &TankLevel) {
-        let mut request:CoapRequest<Endpoint> = CoapRequest::new();
-        // request.message.header.message_id = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-        request.set_method(RequestType::Post);
-        request.set_path("data");
-        request.message.set_content_format(ContentFormat::ApplicationJSON);
-        request.message.payload = serde_json::to_vec(&tank_level.data).unwrap();
 
-        self.socket.connect(
-            SERVER_URL,
-            SERVER_PORT
-        ).await.unwrap();
-
-        self.socket.send(&request.message.to_bytes().unwrap()).await.unwrap();
+    // pub async fn transmit_payload<Endpoint>(&mut self, tank_level: &TankLevel) {
+    //     let mut request:CoapRequest<Endpoint> = CoapRequest::new();
+    //     // request.message.header.message_id = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    //     request.set_method(RequestType::Post);
+    //     request.set_path("data");
+    //     request.message.set_content_format(ContentFormat::ApplicationJSON);
+    //     request.message.payload = serde_json::to_vec(&tank_level.data).unwrap();
+    //
+    //     self.socket.connect(
+    //         SERVER_URL,
+    //         SERVER_PORT
+    //     ).await.unwrap();
+    //
+    //     self.socket.send(&request.message.to_bytes().unwrap()).await.unwrap();
 
         // self.socket.deactivate();
 
         // Ok (())
-    }
+    // }
 }
 
 /// Terminates the application and makes `probe-run` exit with exit-code = 0
@@ -114,4 +116,9 @@ pub fn init() {
             ALLOCATOR.init(HEAP_DATA.as_ptr() as usize, HEAP_DATA.len());
         }
     }
+}
+
+#[alloc_error_handler]
+fn alloc_error(_: core::alloc::Layout) -> ! {
+    cortex_m::asm::udf()
 }
