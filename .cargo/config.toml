@@ -7,3 +7,7 @@ target = "thumbv8m.main-none-eabihf" # Cortex-M33 (with FPU)
 
 [env]
 DEFMT_LOG = "trace"
+
+[alias]
+rb = "run --bin"
+rrb = "run --release --bin"

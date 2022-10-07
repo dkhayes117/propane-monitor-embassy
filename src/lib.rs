@@ -37,13 +37,13 @@ impl From<serde_json::error::Error> for Error {
     }
 }
 
-// impl From<nrf_modem::error::Error> for Error {
-// fn from(e: From<nrf_modem::error::Error>) -> Self {
-//     Self::NrfModem(e)
-//     }
-// }
+impl From<nrf_modem::error::Error> for Error {
+fn from(e: nrf_modem::error::Error) -> Self {
+    Self::NrfModem(e)
+    }
+}
 
-// Structure to hold our payload buffer (heapless Vec)
+/// Structure to hold our payload buffer (heapless Vec)
 #[derive(Serialize)]
 pub struct TankLevel {
     pub data: Vec<i16,3>,
@@ -55,41 +55,41 @@ impl TankLevel {
     }
 }
 
-// Struct for our server connection
+/// Struct for our server socket connection
 pub struct Dtls {
     socket: DtlsSocket,
 }
 
 impl Dtls {
+    /// Constructor for a DTLS encrypted socket
     pub async fn new() -> Result<Self, Error> {
         let socket = DtlsSocket::new(
             PeerVerification::Enabled,
             &[config::SECURITY_TAG]
-        ).await.unwrap();
+        ).await?;
 
         Ok(Self { socket })
     }
 
+    /// Create CoAP request, serialize payload, and transimt data
+    /// request path can start with .s/ for LightDB Stream or .d/ LightDB State for Golioth IoT
+    pub async fn transmit_payload<Endpoint>(&mut self, tank_level: &TankLevel) -> Result<(), Error> {
+        let mut request:CoapRequest<Endpoint> = CoapRequest::new();
+        // request.message.header.message_id = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+        request.set_method(RequestType::Post);
+        request.set_path(".s/tank_level");
+        request.message.set_content_format(ContentFormat::ApplicationJSON);
+        request.message.payload = serde_json::to_vec(tank_level)?;
 
-    // pub async fn transmit_payload<Endpoint>(&mut self, tank_level: &TankLevel) {
-    //     let mut request:CoapRequest<Endpoint> = CoapRequest::new();
-    //     // request.message.header.message_id = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-    //     request.set_method(RequestType::Post);
-    //     request.set_path("data");
-    //     request.message.set_content_format(ContentFormat::ApplicationJSON);
-    //     request.message.payload = serde_json::to_vec(&tank_level.data).unwrap();
-    //
-    //     self.socket.connect(
-    //         SERVER_URL,
-    //         SERVER_PORT
-    //     ).await.unwrap();
-    //
-    //     self.socket.send(&request.message.to_bytes().unwrap()).await.unwrap();
+        self.socket.connect(
+            SERVER_URL,
+            SERVER_PORT
+        ).await?;
 
-        // self.socket.deactivate();
+        self.socket.send(&request.message.to_bytes()?).await?;
 
-        // Ok (())
-    // }
+        Ok (())
+    }
 }
 
 /// Terminates the application and makes `probe-run` exit with exit-code = 0
@@ -99,7 +99,7 @@ pub fn exit() -> ! {
     }
 }
 
-// An allocator is required for the coap-lite lib
+/// An allocator is required for the coap-lite lib
 #[global_allocator]
 static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
 
@@ -118,6 +118,7 @@ pub fn init() {
     }
 }
 
+/// Default alloc error handler for when allocation fails
 #[alloc_error_handler]
 fn alloc_error(_: core::alloc::Layout) -> ! {
     cortex_m::asm::udf()

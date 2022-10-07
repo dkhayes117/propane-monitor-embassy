@@ -20,7 +20,7 @@ use propane_monitor_embassy::{Dtls, TankLevel};
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     // Set up the interrupts for the modem
-    let egu1 = embassy_nrf::interrupt::take!(EGU1);
+    let egu1 = interrupt::take!(EGU1);
     egu1.set_priority(Priority::P4);
     egu1.set_handler(|_| {
         nrf_modem::application_irq_handler();
@@ -28,7 +28,7 @@ async fn main(_spawner: Spawner) {
     });
     egu1.enable();
 
-    let ipc = embassy_nrf::interrupt::take!(IPC);
+    let ipc = interrupt::take!(IPC);
     ipc.set_priority(Priority::P0);
     ipc.set_handler(|_| {
         nrf_modem::ipc_irq_handler();
@@ -36,6 +36,7 @@ async fn main(_spawner: Spawner) {
     });
     ipc.enable();
 
+    /// dcdcen must be enabled before the modem is started
     let regulators: embassy_nrf::pac::REGULATORS = unsafe { core::mem::transmute(()) };
     regulators.dcdcen.modify(|_, w| w.dcdcen().enabled());
 
@@ -92,10 +93,10 @@ async fn run() {
             preference: ConnectionPreference::Lte,
         }).await
     );
-    //
-    // // Create our LTE Link
-    // let link = LteLink::new().await.unwrap();
-    // let mut dtls = Dtls::new();
+
+    // Create our LTE Link
+    let link = LteLink::new().await.unwrap();
+    let mut dtls = Dtls::new();
 
     loop {
         let mut buf = [0; 1];
@@ -110,11 +111,12 @@ async fn run() {
 
         tank_level.data.push(buf[0]).unwrap();
 
-        // Our payload data buff is full, send to the cloud, clear the buffer, disconnect socket
+        // Our payload data buff is full, send to the cloud, clear the buffer
         if tank_level.data.is_full() {
             for val in &tank_level.data{
                 info!("{}", val);
             }
+
             // dtls.transmit_payload(&tank_level).unwrap().await;
             tank_level.data.clear();
         }
