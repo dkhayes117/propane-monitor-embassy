@@ -7,6 +7,7 @@ use defmt::{info, unwrap};
 use embassy_executor::Spawner;
 use embassy_nrf::gpio::{Flex, Level, Output, OutputDrive};
 use embassy_nrf::interrupt::{self, InterruptExt, Priority};
+use embassy_nrf::pac::{REGULATORS, UARTE0, UARTE1};
 // use embassy_nrf::pwm::{Prescaler, SimplePwm};
 use embassy_nrf::saadc::{ChannelConfig, Config, Oversample, Saadc};
 use embassy_time::{Duration, Ticker, Timer};
@@ -14,7 +15,7 @@ use futures::StreamExt;
 use nrf_modem::{ConnectionPreference, SystemMode};
 use nrf_modem::lte_link::LteLink;
 use propane_monitor_embassy as _;
-use propane_monitor_embassy::{Dtls, TankLevel};
+use propane_monitor_embassy::{Dtls, Error, TankLevel};
 
 
 #[embassy_executor::main]
@@ -36,23 +37,27 @@ async fn main(_spawner: Spawner) {
     });
     ipc.enable();
 
-    /// dcdcen must be enabled before the modem is started
-    let regulators: embassy_nrf::pac::REGULATORS = unsafe { core::mem::transmute(()) };
+    // dcdcen must be enabled before the modem is started, not after
+    // Enabling DCDC mode will allow modem to automatically switch between DCDC mode and LDO
+    // mode for greatest power efficiency
+    let regulators: REGULATORS = unsafe { core::mem::transmute(()) };
     regulators.dcdcen.modify(|_, w| w.dcdcen().enabled());
 
     // Disable UARTE for lower power consumption
-    let uarte0 = unsafe{ &*embassy_nrf::pac::UARTE0::PTR};
-    let uarte1 = unsafe{ &*embassy_nrf::pac::UARTE1::PTR};
+    let uarte0: UARTE0 = unsafe{ core::mem::transmute(()) };
+    let uarte1: UARTE1 = unsafe{ core::mem::transmute(()) };
     uarte0.enable.write(|w| w.enable().disabled());
     uarte1.enable.write(|w| w.enable().disabled());
 
-    // Run our sampling program
-    run().await;
+    // Run our sampling program, will not return unless an error occurs
+    let app_error = run().await.unwrap();
 
+    // If we get here, we have problems, reboot device
+    info!("{:?}", app_error);
     propane_monitor_embassy::exit();
 }
 
-async fn run() {
+async fn run() -> Result<(), Error> {
     // Handle for device peripherals
     let mut p = embassy_nrf::init(Default::default());
 
@@ -65,7 +70,7 @@ async fn run() {
     // Heapless buffer to hold our sample values before transmitting
     let mut tank_level = TankLevel::new();
 
-    // Configuration of ADC
+    // Configuration of ADC, over sample to reduce noise (8x)
     let mut adc_config = Config::default();
     adc_config.oversample = Oversample::OVER8X;
 
@@ -95,8 +100,8 @@ async fn run() {
     );
 
     // Create our LTE Link
-    let link = LteLink::new().await.unwrap();
-    let mut dtls = Dtls::new();
+    let _link = LteLink::new().await?;
+    let mut dtls = Dtls::new().await?;
 
     loop {
         let mut buf = [0; 1];
@@ -117,7 +122,7 @@ async fn run() {
                 info!("{}", val);
             }
 
-            // dtls.transmit_payload(&tank_level).unwrap().await;
+            dtls.transmit_payload(&tank_level).await?;
             tank_level.data.clear();
         }
 

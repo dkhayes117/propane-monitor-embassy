@@ -73,8 +73,8 @@ impl Dtls {
 
     /// Create CoAP request, serialize payload, and transimt data
     /// request path can start with .s/ for LightDB Stream or .d/ LightDB State for Golioth IoT
-    pub async fn transmit_payload<Endpoint>(&mut self, tank_level: &TankLevel) -> Result<(), Error> {
-        let mut request:CoapRequest<Endpoint> = CoapRequest::new();
+    pub async fn transmit_payload(&mut self, tank_level: &TankLevel) -> Result<(), Error> {
+        let mut request: CoapRequest<DtlsSocket> = CoapRequest::new();
         // request.message.header.message_id = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
         request.set_method(RequestType::Post);
         request.set_path(".s/tank_level");
