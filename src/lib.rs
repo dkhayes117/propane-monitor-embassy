@@ -8,7 +8,9 @@ use serde::Serialize;
 use coap_lite::{CoapRequest, ContentFormat, RequestType};
 use coap_lite::error::MessageError;
 use alloc_cortex_m::CortexMHeap;
+use defmt::info;
 use embassy_nrf as _;
+use embassy_time::TimeoutError;
 use heapless::Vec;
 use nrf_modem::dtls_socket::{DtlsSocket, PeerVerification};
 use {defmt_rtt as _, panic_probe as _};
@@ -23,6 +25,7 @@ pub enum Error {
     Coap(MessageError),
     Json(serde_json::error::Error),
     NrfModem(nrf_modem::error::Error),
+    Timeout(TimeoutError),
 }
 
 impl From<MessageError> for Error {
@@ -40,6 +43,12 @@ impl From<serde_json::error::Error> for Error {
 impl From<nrf_modem::error::Error> for Error {
 fn from(e: nrf_modem::error::Error) -> Self {
     Self::NrfModem(e)
+    }
+}
+
+impl From<TimeoutError> for Error {
+    fn from(e: TimeoutError) -> Self {
+        Self::Timeout(e)
     }
 }
 
@@ -79,7 +88,9 @@ impl Dtls {
         request.set_method(RequestType::Post);
         request.set_path(".s/tank_level");
         request.message.set_content_format(ContentFormat::ApplicationJSON);
-        request.message.payload = serde_json::to_vec(tank_level)?;
+        let json = serde_json::to_vec(tank_level)?;
+        info!("{}",defmt::Debug2Format(&json));
+        request.message.payload = json;
 
         self.socket.connect(
             SERVER_URL,
@@ -103,9 +114,9 @@ pub fn exit() -> ! {
 #[global_allocator]
 static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
 
-static mut HEAP_DATA: [MaybeUninit<u8>; 8192] = [MaybeUninit::uninit(); 8192];
+static mut HEAP_DATA: [MaybeUninit<u8>; 16384] = [MaybeUninit::uninit(); 16384];
 
-pub fn init() {
+pub fn alloc_init() {
     static ONCE: AtomicBool = AtomicBool::new(false);
 
     if ONCE

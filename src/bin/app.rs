@@ -2,7 +2,6 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-
 use defmt::{info, unwrap};
 use embassy_executor::Spawner;
 use embassy_nrf::gpio::{Flex, Level, Output, OutputDrive};
@@ -37,6 +36,9 @@ async fn main(_spawner: Spawner) {
     });
     ipc.enable();
 
+    // Initialize heap data
+    propane_monitor_embassy::alloc_init();
+
     // dcdcen must be enabled before the modem is started, not after
     // Enabling DCDC mode will allow modem to automatically switch between DCDC mode and LDO
     // mode for greatest power efficiency
@@ -50,11 +52,14 @@ async fn main(_spawner: Spawner) {
     uarte1.enable.write(|w| w.enable().disabled());
 
     // Run our sampling program, will not return unless an error occurs
-    let app_error = run().await.unwrap();
-
-    // If we get here, we have problems, reboot device
-    info!("{:?}", app_error);
-    propane_monitor_embassy::exit();
+    match run().await {
+        Ok(()) => propane_monitor_embassy::exit(),
+        Err(e) => {
+            // If we get here, we have problems, reboot device
+            info!("{:?}", defmt::Debug2Format(&e));
+            propane_monitor_embassy::exit();
+        }
+    }
 }
 
 async fn run() -> Result<(), Error> {
@@ -99,8 +104,13 @@ async fn run() -> Result<(), Error> {
         }).await
     );
 
-    // Create our LTE Link
-    let _link = LteLink::new().await?;
+    // Create our LTE Link and connect with a 30 second timeout
+    info!("Creating LTE Link");
+    let link = LteLink::new().await?;
+    embassy_time::with_timeout(Duration::from_secs(60), link.wait_for_link())
+        .await??;
+
+    info!("Creating DTLS socket");
     let mut dtls = Dtls::new().await?;
 
     loop {
@@ -119,9 +129,10 @@ async fn run() -> Result<(), Error> {
         // Our payload data buff is full, send to the cloud, clear the buffer
         if tank_level.data.is_full() {
             for val in &tank_level.data{
-                info!("{}", val);
+                info!("ADC: {}", val);
             }
-
+            // info!("TankLevel: {}", core::mem::size_of::<TankLevel>());
+            info!("Buffer full: Transmitting data over CoAP");
             dtls.transmit_payload(&tank_level).await?;
             tank_level.data.clear();
         }
