@@ -106,7 +106,7 @@ async fn run() -> Result<(), Error> {
     // Create our LTE Link and connect with a 30 second timeout
     info!("Creating LTE Link");
     let link = LteLink::new().await?;
-    embassy_time::with_timeout(Duration::from_secs(60), link.wait_for_link()).await??;
+    embassy_time::with_timeout(Duration::from_secs(1800), link.wait_for_link()).await??;
 
     loop {
         let mut buf = [0; 1];
@@ -128,7 +128,7 @@ async fn run() -> Result<(), Error> {
             // }
             // info!("TankLevel: {}", core::mem::size_of::<TankLevel>());
             info!("Creating DTLS socket");
-            let mut dtls = Dtls::new().await?;
+            let dtls = Dtls::new().await?;
 
             info!("Transmitting data over CoAP");
             dtls.transmit_payload(&payload).await?;

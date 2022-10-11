@@ -79,7 +79,7 @@ impl Payload {
 }
 
 /// Structure to hold our payload buffer (heapless Vec)
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct TankLevel {
     pub value: i16,
     pub timestamp: u32,
@@ -124,7 +124,7 @@ impl Dtls {
 
         self.socket.send(&request.message.to_bytes()?).await?;
 
-        self.socket.deactivate();
+        self.socket.deactivate().await?;
 
         Ok(())
     }
