@@ -2,23 +2,37 @@
 #![no_std]
 #![feature(alloc_error_handler)]
 
+use crate::config::{PSK, PSK_ID, SECURITY_TAG, SERVER_PORT, SERVER_URL};
+use alloc_cortex_m::CortexMHeap;
+use coap_lite::error::MessageError;
+use coap_lite::{CoapRequest, ContentFormat, RequestType};
+use core::fmt::write;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
-use serde::Serialize;
-use coap_lite::{CoapRequest, ContentFormat, RequestType};
-use coap_lite::error::MessageError;
-use alloc_cortex_m::CortexMHeap;
-use defmt::info;
+use defmt::{info, Format};
 use embassy_nrf as _;
 use embassy_time::TimeoutError;
-use heapless::Vec;
+use heapless::{String, Vec};
 use nrf_modem::dtls_socket::{DtlsSocket, PeerVerification};
+use serde::Serialize;
 use {defmt_rtt as _, panic_probe as _};
-use crate::config::{SERVER_PORT, SERVER_URL};
 
+extern crate alloc;
 extern crate tinyrlibc;
 
 pub mod config;
+
+/// Credential Storage Management Types
+#[derive(Clone, Copy, Format)]
+#[allow(dead_code)]
+enum CSMType {
+    RootCert = 0,
+    ClientCert = 1,
+    ClientPrivateKey = 2,
+    Psk = 3,
+    PskId = 4,
+    // ...
+}
 
 #[derive(Debug)]
 pub enum Error {
@@ -41,8 +55,8 @@ impl From<serde_json::error::Error> for Error {
 }
 
 impl From<nrf_modem::error::Error> for Error {
-fn from(e: nrf_modem::error::Error) -> Self {
-    Self::NrfModem(e)
+    fn from(e: nrf_modem::error::Error) -> Self {
+        Self::NrfModem(e)
     }
 }
 
@@ -55,7 +69,7 @@ impl From<TimeoutError> for Error {
 /// Structure to hold our payload buffer (heapless Vec)
 #[derive(Serialize)]
 pub struct TankLevel {
-    pub data: Vec<i16,3>,
+    pub data: Vec<i16, 3>,
 }
 
 impl TankLevel {
@@ -72,10 +86,7 @@ pub struct Dtls {
 impl Dtls {
     /// Constructor for a DTLS encrypted socket
     pub async fn new() -> Result<Self, Error> {
-        let socket = DtlsSocket::new(
-            PeerVerification::Enabled,
-            &[config::SECURITY_TAG]
-        ).await?;
+        let socket = DtlsSocket::new(PeerVerification::Enabled, &[config::SECURITY_TAG]).await?;
 
         Ok(Self { socket })
     }
@@ -87,20 +98,79 @@ impl Dtls {
         // request.message.header.message_id = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
         request.set_method(RequestType::Post);
         request.set_path(".s/tank_level");
-        request.message.set_content_format(ContentFormat::ApplicationJSON);
+        request
+            .message
+            .set_content_format(ContentFormat::ApplicationJSON);
         let json = serde_json::to_vec(tank_level)?;
-        info!("{}",defmt::Debug2Format(&json));
+        info!("{}", defmt::Debug2Format(&json));
         request.message.payload = json;
 
-        self.socket.connect(
-            SERVER_URL,
-            SERVER_PORT
-        ).await?;
+        self.socket.connect(SERVER_URL, SERVER_PORT).await?;
 
         self.socket.send(&request.message.to_bytes()?).await?;
 
-        Ok (())
+        Ok(())
     }
+}
+
+/// This function deletes a key or certificate from the nrf modem
+async fn key_delete(ty: CSMType) -> Result<(), Error> {
+    let mut cmd: String<32> = String::new();
+    write(
+        &mut cmd,
+        format_args!("AT%CMNG=3,{},{}", SECURITY_TAG, ty as u32),
+    )
+    .unwrap();
+    nrf_modem::at::send_at::<32>(cmd.as_str()).await?;
+    Ok(())
+}
+
+/// This function writes a key or certificate to the nrf modem
+async fn key_write(ty: CSMType, data: &str) -> Result<(), Error> {
+    let mut cmd: String<128> = String::new();
+    write(
+        &mut cmd,
+        format_args!(r#"AT%CMNG=0,{},{},"{}""#, SECURITY_TAG, ty as u32, data),
+    )
+    .unwrap();
+
+    nrf_modem::at::send_at::<128>(&cmd.as_str()).await?;
+
+    Ok(())
+}
+
+/// Delete existing keys/certificates and loads new ones based on config.rs entries
+pub async fn install_psk_id_and_psk() -> Result<(), Error> {
+    assert!(
+        !&PSK_ID.is_empty() && !&PSK.is_empty(),
+        "PSK ID and PSK must not be empty. Set them in the `config` module."
+    );
+
+    key_delete(CSMType::PskId).await?;
+    key_delete(CSMType::Psk).await?;
+
+    key_write(CSMType::PskId, &PSK_ID).await?;
+    key_write(CSMType::Psk, &encode_psk_as_hex(&PSK)).await?;
+
+    Ok(())
+}
+
+fn encode_psk_as_hex(psk: &[u8]) -> String<128> {
+    fn hex_from_digit(num: u8) -> char {
+        if num < 10 {
+            (b'0' + num) as char
+        } else {
+            (b'a' + num - 10) as char
+        }
+    }
+
+    let mut s: String<128> = String::new();
+    for ch in psk {
+        s.push(hex_from_digit(ch / 16)).unwrap();
+        s.push(hex_from_digit(ch % 16)).unwrap();
+    }
+
+    s
 }
 
 /// Terminates the application and makes `probe-run` exit with exit-code = 0
@@ -114,7 +184,7 @@ pub fn exit() -> ! {
 #[global_allocator]
 static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
 
-static mut HEAP_DATA: [MaybeUninit<u8>; 16384] = [MaybeUninit::uninit(); 16384];
+static mut HEAP_DATA: [MaybeUninit<u8>; 8196] = [MaybeUninit::uninit(); 8196];
 
 pub fn alloc_init() {
     static ONCE: AtomicBool = AtomicBool::new(false);

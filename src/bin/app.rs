@@ -11,11 +11,10 @@ use embassy_nrf::pac::{REGULATORS, UARTE0, UARTE1};
 use embassy_nrf::saadc::{ChannelConfig, Config, Oversample, Saadc};
 use embassy_time::{Duration, Ticker, Timer};
 use futures::StreamExt;
-use nrf_modem::{ConnectionPreference, SystemMode};
 use nrf_modem::lte_link::LteLink;
-use propane_monitor_embassy as _;
+use nrf_modem::{ConnectionPreference, SystemMode};
+use propane_monitor_embassy as lib;
 use propane_monitor_embassy::{Dtls, Error, TankLevel};
-
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -36,9 +35,6 @@ async fn main(_spawner: Spawner) {
     });
     ipc.enable();
 
-    // Initialize heap data
-    propane_monitor_embassy::alloc_init();
-
     // dcdcen must be enabled before the modem is started, not after
     // Enabling DCDC mode will allow modem to automatically switch between DCDC mode and LDO
     // mode for greatest power efficiency
@@ -46,18 +42,21 @@ async fn main(_spawner: Spawner) {
     regulators.dcdcen.modify(|_, w| w.dcdcen().enabled());
 
     // Disable UARTE for lower power consumption
-    let uarte0: UARTE0 = unsafe{ core::mem::transmute(()) };
-    let uarte1: UARTE1 = unsafe{ core::mem::transmute(()) };
+    let uarte0: UARTE0 = unsafe { core::mem::transmute(()) };
+    let uarte1: UARTE1 = unsafe { core::mem::transmute(()) };
     uarte0.enable.write(|w| w.enable().disabled());
     uarte1.enable.write(|w| w.enable().disabled());
 
+    // Initialize heap data
+    lib::alloc_init();
+
     // Run our sampling program, will not return unless an error occurs
     match run().await {
-        Ok(()) => propane_monitor_embassy::exit(),
+        Ok(()) => lib::exit(),
         Err(e) => {
             // If we get here, we have problems, reboot device
             info!("{:?}", defmt::Debug2Format(&e));
-            propane_monitor_embassy::exit();
+            lib::exit();
         }
     }
 }
@@ -88,27 +87,26 @@ async fn run() -> Result<(), Error> {
     );
 
     // Hall effect sensor power, must be High Drive to provide enough current (6 mA)
-    let mut hall_effect = Output::new(
-        p.P0_31,
-        Level::Low,
-        OutputDrive::Disconnect0HighDrive1
-    );
+    let mut hall_effect = Output::new(p.P0_31, Level::Low, OutputDrive::Disconnect0HighDrive1);
 
     // Initialize modem
     unwrap!(
-        nrf_modem::init( SystemMode {
+        nrf_modem::init(SystemMode {
             lte_support: true,
             nbiot_support: false,
             gnss_support: true,
             preference: ConnectionPreference::Lte,
-        }).await
+        })
+        .await
     );
+
+    // install PSK info for secure cloud connectivity
+    lib::install_psk_id_and_psk().await?;
 
     // Create our LTE Link and connect with a 30 second timeout
     info!("Creating LTE Link");
     let link = LteLink::new().await?;
-    embassy_time::with_timeout(Duration::from_secs(60), link.wait_for_link())
-        .await??;
+    embassy_time::with_timeout(Duration::from_secs(60), link.wait_for_link()).await??;
 
     info!("Creating DTLS socket");
     let mut dtls = Dtls::new().await?;
@@ -128,7 +126,7 @@ async fn run() -> Result<(), Error> {
 
         // Our payload data buff is full, send to the cloud, clear the buffer
         if tank_level.data.is_full() {
-            for val in &tank_level.data{
+            for val in &tank_level.data {
                 info!("ADC: {}", val);
             }
             // info!("TankLevel: {}", core::mem::size_of::<TankLevel>());
