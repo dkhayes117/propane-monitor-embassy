@@ -14,7 +14,7 @@ use futures::StreamExt;
 use nrf_modem::lte_link::LteLink;
 use nrf_modem::{ConnectionPreference, SystemMode};
 use propane_monitor_embassy as lib;
-use propane_monitor_embassy::{Dtls, Error, TankLevel};
+use propane_monitor_embassy::{Dtls, Error, Payload, TankLevel};
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -72,7 +72,7 @@ async fn run() -> Result<(), Error> {
     let mut ticker = Ticker::every(Duration::from_secs(15));
 
     // Heapless buffer to hold our sample values before transmitting
-    let mut tank_level = TankLevel::new();
+    let mut payload = Payload::new();
 
     // Configuration of ADC, over sample to reduce noise (8x)
     let mut adc_config = Config::default();
@@ -108,9 +108,6 @@ async fn run() -> Result<(), Error> {
     let link = LteLink::new().await?;
     embassy_time::with_timeout(Duration::from_secs(60), link.wait_for_link()).await??;
 
-    info!("Creating DTLS socket");
-    let mut dtls = Dtls::new().await?;
-
     loop {
         let mut buf = [0; 1];
 
@@ -122,17 +119,21 @@ async fn run() -> Result<(), Error> {
 
         hall_effect.set_low();
 
-        tank_level.data.push(buf[0]).unwrap();
+        payload.data.push(TankLevel::new(buf[0], 1987)).unwrap();
 
         // Our payload data buff is full, send to the cloud, clear the buffer
-        if tank_level.data.is_full() {
-            for val in &tank_level.data {
-                info!("ADC: {}", val);
-            }
+        if payload.data.is_full() {
+            // for val in &tank_level.data {
+            //     info!("ADC: {}", val);
+            // }
             // info!("TankLevel: {}", core::mem::size_of::<TankLevel>());
-            info!("Buffer full: Transmitting data over CoAP");
-            dtls.transmit_payload(&tank_level).await?;
-            tank_level.data.clear();
+            info!("Creating DTLS socket");
+            let mut dtls = Dtls::new().await?;
+
+            info!("Transmitting data over CoAP");
+            dtls.transmit_payload(&payload).await?;
+
+            payload.data.clear();
         }
 
         ticker.next().await; // wait for next tick event

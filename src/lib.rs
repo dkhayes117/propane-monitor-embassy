@@ -66,17 +66,32 @@ impl From<TimeoutError> for Error {
     }
 }
 
+/// payload to send over CoAP
+#[derive(Serialize)]
+pub struct Payload {
+    pub data: Vec<TankLevel,3>,
+}
+
+impl Payload {
+    pub fn new() -> Self {
+        Payload { data: Vec::new() }
+    }
+}
+
 /// Structure to hold our payload buffer (heapless Vec)
 #[derive(Serialize)]
 pub struct TankLevel {
-    pub data: Vec<i16, 3>,
+    pub value: i16,
+    pub timestamp: u32,
 }
 
 impl TankLevel {
-    pub fn new() -> Self {
-        TankLevel { data: Vec::new() }
+    pub fn new(value: i16, timestamp: u32) -> Self {
+        TankLevel { value, timestamp  }
     }
 }
+
+
 
 /// Struct for our server socket connection
 pub struct Dtls {
@@ -86,14 +101,14 @@ pub struct Dtls {
 impl Dtls {
     /// Constructor for a DTLS encrypted socket
     pub async fn new() -> Result<Self, Error> {
-        let socket = DtlsSocket::new(PeerVerification::Enabled, &[config::SECURITY_TAG]).await?;
+        let socket = DtlsSocket::new(PeerVerification::Enabled, &[SECURITY_TAG]).await?;
 
         Ok(Self { socket })
     }
 
     /// Create CoAP request, serialize payload, and transimt data
     /// request path can start with .s/ for LightDB Stream or .d/ LightDB State for Golioth IoT
-    pub async fn transmit_payload(&mut self, tank_level: &TankLevel) -> Result<(), Error> {
+    pub async fn transmit_payload(mut self, payload: &Payload) -> Result<(), Error> {
         let mut request: CoapRequest<DtlsSocket> = CoapRequest::new();
         // request.message.header.message_id = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
         request.set_method(RequestType::Post);
@@ -101,13 +116,15 @@ impl Dtls {
         request
             .message
             .set_content_format(ContentFormat::ApplicationJSON);
-        let json = serde_json::to_vec(tank_level)?;
+        let json = serde_json::to_vec(payload)?;
         info!("{}", defmt::Debug2Format(&json));
         request.message.payload = json;
 
         self.socket.connect(SERVER_URL, SERVER_PORT).await?;
 
         self.socket.send(&request.message.to_bytes()?).await?;
+
+        self.socket.deactivate();
 
         Ok(())
     }
