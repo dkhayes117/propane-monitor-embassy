@@ -118,17 +118,19 @@ pub async fn transmit_payload(payload: &Payload) -> Result<(), Error> {
     let json = serde_json::to_vec(payload)?;
     request.message.payload = json;
 
-    info!("Creating LTE Link");
+    // Establish an LTE link
     let link = LteLink::new().await?;
     link.wait_for_link().await?;
 
-    info!("Creating DTLS socket");
+    // Create our DTLS socket
     let mut socket = DtlsSocket::new(PeerVerification::Enabled, &[SECURITY_TAG]).await?;
 
     socket.connect(SERVER_URL, SERVER_PORT).await?;
 
     socket.send(&request.message.to_bytes()?).await?;
 
+    // The sockets would be dropped after the function call ends, but this explicit call allows them
+    // to be dropped asynchronously
     socket.deactivate().await?;
     link.deactivate().await?;
 
