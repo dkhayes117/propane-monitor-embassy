@@ -984,6 +984,7 @@ dependencies = [
  "panic-probe",
  "serde",
  "serde_json",
+ "static_cell",
  "tinyrlibc",
 ]
 

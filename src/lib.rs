@@ -71,7 +71,7 @@ impl From<TimeoutError> for Error {
 /// Payload to send over CoAP (Heapless Vec of Tanklevel Structs)
 #[derive(Serialize)]
 pub struct Payload {
-    pub data: Vec<TankLevel, 1>,
+    pub data: Vec<TankLevel, 3>,
 }
 
 impl Payload {

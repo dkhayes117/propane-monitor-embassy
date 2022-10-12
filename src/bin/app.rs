@@ -138,10 +138,8 @@ async fn run() -> Result<(), Error> {
             payload.data.clear();
 
             blue_led.set_high();
-            break;
         }
 
         ticker.next().await; // wait for next tick event
     }
-    Ok(())
 }
