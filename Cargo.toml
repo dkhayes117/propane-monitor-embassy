@@ -19,11 +19,6 @@ embassy-sync = { version = "0.1.0", features = ["defmt"] }
 embassy-executor = { version = "0.1.0", features = ["defmt", "integrated-timers"] }
 embassy-time = { version = "0.1.0", features = ["defmt", "defmt-timestamp-uptime"] }
 embassy-nrf = { version = "0.1.0", features = ["defmt", "nrf9160-ns", "time-driver-rtc1", "gpiote", "unstable-pac"] }
-#embassy-net = { version = "0.1.0", features = ["defmt", "tcp", "dhcpv4", "medium-ethernet", "pool-16"], optional = true }
-#embassy-usb = { version = "0.1.0", features = ["defmt"], optional = true }
-#embassy-usb-serial = { version = "0.1.0", features = ["defmt"], optional = true }
-#embassy-usb-hid = { version = "0.1.0", features = ["defmt"], optional = true }
-#embassy-usb-ncm = { version = "0.1.0", features = ["defmt"], optional = true }
 embedded-io = "0.3.0"
 futures = { version = "0.3.17", default-features = false, features = ["async-await"] }
 heapless = { version = "0.7.16", features = ["serde"] }
@@ -31,7 +26,7 @@ nrf-modem = { git = "https://github.com/diondokter/nrf-modem.git", features = ["
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
-static_cell = "1.0"
+#static_cell = "1.0"
 tinyrlibc = { git = "https://github.com/diondokter/tinyrlibc.git", branch = "ncs-2.0.1" }
 
 
@@ -41,8 +36,14 @@ embassy-sync = { git = "https://github.com/embassy-rs/embassy" }
 embassy-executor = { git = "https://github.com/embassy-rs/embassy" }
 embassy-time = { git = "https://github.com/embassy-rs/embassy" }
 embassy-nrf = { git = "https://github.com/embassy-rs/embassy" }
-#embassy-net = { git = "https://github.com/embassy-rs/embassy" }
-#embassy-usb = { git = "https://github.com/embassy-rs/embassy" }
-#embassy-usb-serial = { git = "https://github.com/embassy-rs/embassy" }
-#embassy-usb-hid = { git = "https://github.com/embassy-rs/embassy" }
-#embassy-usb-ncm = { git = "https://github.com/embassy-rs/embassy" }
+
+# cargo build/run --release
+# https://doc.rust-lang.org/cargo/reference/profiles.html
+[profile.release]
+codegen-units = 1
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'thin'
+opt-level = 3
+overflow-checks = true
