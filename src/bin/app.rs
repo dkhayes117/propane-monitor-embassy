@@ -70,9 +70,6 @@ async fn run() -> Result<(), Error> {
     // Create our sleep timer (time between sensor measurements)
     let mut ticker = Ticker::every(Duration::from_secs(15));
 
-    // Heapless buffer to hold our sample values before transmitting
-    let mut payload = Payload::new();
-
     // Configuration of ADC, over sample to reduce noise (8x)
     let mut adc_config = Config::default();
     adc_config.oversample = Oversample::OVER8X;
@@ -105,6 +102,9 @@ async fn run() -> Result<(), Error> {
     // install PSK info for secure cloud connectivity
     install_psk_id_and_psk().await?;
 
+    // Heapless buffer to hold our sample values before transmitting
+    let mut payload = Payload::new();
+
     loop {
         let mut buf = [0; 1];
 
@@ -131,9 +131,14 @@ async fn run() -> Result<(), Error> {
             blue_led.set_low();
 
             info!("Transmitting data over CoAP");
-            embassy_time::with_timeout(Duration::from_secs(180), transmit_payload(&payload))
-                .await??;
-            // LTE link and dtls socket should go out of scope and be dropped here for power savings
+            // If timeout occurs log a timeout and continue.
+            if let Err(e) = embassy_time::with_timeout(Duration::from_secs(30), transmit_payload(&payload))
+                .await {
+                payload.timeouts += 1;
+                info!("{} has occurred {} time(s), data clear and start over", e, payload.timeouts);
+            } else {
+                payload.timeouts = 0;
+            }
 
             payload.data.clear();
 

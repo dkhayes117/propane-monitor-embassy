@@ -9,7 +9,7 @@ use coap_lite::{CoapRequest, ContentFormat, RequestType};
 use core::fmt::write;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
-use defmt::{info, Format};
+use defmt::{info, Format,Debug2Format};
 use embassy_nrf as _;
 use embassy_time::TimeoutError;
 use heapless::{String, Vec};
@@ -72,11 +72,12 @@ impl From<TimeoutError> for Error {
 #[derive(Serialize)]
 pub struct Payload {
     pub data: Vec<TankLevel, 3>,
+    pub timeouts: u8,
 }
 
 impl Payload {
     pub fn new() -> Self {
-        Payload { data: Vec::new() }
+        Payload { data: Vec::new(), timeouts: 0 }
     }
 }
 
@@ -116,6 +117,7 @@ pub async fn transmit_payload(payload: &Payload) -> Result<(), Error> {
         .message
         .set_content_format(ContentFormat::ApplicationJSON);
     let json = serde_json::to_vec(payload)?;
+    info!("Payload: {:?}", Debug2Format(&json));
     request.message.payload = json;
 
     // Establish an LTE link
