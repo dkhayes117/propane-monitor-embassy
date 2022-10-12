@@ -11,9 +11,10 @@ use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::{info, Format};
 use embassy_nrf as _;
-use embassy_time::TimeoutError;
+use embassy_time::{Duration, TimeoutError};
 use heapless::{String, Vec};
 use nrf_modem::dtls_socket::{DtlsSocket, PeerVerification};
+use nrf_modem::lte_link::LteLink;
 use serde::Serialize;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -34,6 +35,7 @@ enum CSMType {
     // ...
 }
 
+/// Crate error types
 #[derive(Debug)]
 pub enum Error {
     Coap(MessageError),
@@ -66,7 +68,7 @@ impl From<TimeoutError> for Error {
     }
 }
 
-/// payload to send over CoAP
+/// Payload to send over CoAP (Heapless Vec of Tanklevel Structs)
 #[derive(Serialize)]
 pub struct Payload {
     pub data: Vec<TankLevel,3>,
@@ -78,7 +80,7 @@ impl Payload {
     }
 }
 
-/// Structure to hold our payload buffer (heapless Vec)
+/// Structure to hold our individual measure data
 #[derive(Debug, Serialize)]
 pub struct TankLevel {
     pub value: i16,
@@ -91,44 +93,51 @@ impl TankLevel {
     }
 }
 
-
-
-/// Struct for our server socket connection
-pub struct Dtls {
-    socket: DtlsSocket,
+/// Function to retrieve GPS data from a single GNSS fix
+pub async fn gnss_data() -> Result<(), Error> {
+    nrf_modem::configure_gnss_on_pca10090ns().await?;
+    let mut gnss = nrf_modem::gnss::Gnss::new().await?;
+    let config = nrf_modem::gnss::GnssConfig::default();
+    let mut iter = gnss.start_single_fix(config)?;
+    if let Some(x) = futures::StreamExt::next(&mut iter).await {
+        defmt::println!("{:?}", defmt::Debug2Format(&x));
+    }
+    Ok(())
 }
 
-impl Dtls {
-    /// Constructor for a DTLS encrypted socket
-    pub async fn new() -> Result<Self, Error> {
-        let socket = DtlsSocket::new(PeerVerification::Enabled, &[SECURITY_TAG]).await?;
+/// Create CoAP request, serialize payload, and transimt data
+/// request path can start with .s/ for LightDB Stream or .d/ LightDB State for Golioth IoT
+pub async fn transmit_payload(payload: &Payload) -> Result<(), Error> {
+    // Create our LTE Link and connect with a 30 second timeout
+    info!("Creating LTE Link");
+    let link = LteLink::new().await?;
+    embassy_time::with_timeout(
+        Duration::from_secs(30), link.wait_for_link()
+    ).await??;
 
-        Ok(Self { socket })
-    }
+    info!("Creating DTLS socket");
+    let mut socket = DtlsSocket::new(PeerVerification::Enabled, &[SECURITY_TAG]).await?;
 
-    /// Create CoAP request, serialize payload, and transimt data
-    /// request path can start with .s/ for LightDB Stream or .d/ LightDB State for Golioth IoT
-    pub async fn transmit_payload(mut self, payload: &Payload) -> Result<(), Error> {
-        let mut request: CoapRequest<DtlsSocket> = CoapRequest::new();
-        // request.message.header.message_id = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-        request.set_method(RequestType::Post);
-        request.set_path(".s/tank_level");
-        request
-            .message
-            .set_content_format(ContentFormat::ApplicationJSON);
-        let json = serde_json::to_vec(payload)?;
-        info!("{}", defmt::Debug2Format(&json));
-        request.message.payload = json;
+    let mut request: CoapRequest<DtlsSocket> = CoapRequest::new();
+    // request.message.header.message_id = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    request.set_method(RequestType::Post);
+    request.set_path(".s/tank_level");
+    request
+        .message
+        .set_content_format(ContentFormat::ApplicationJSON);
+    let json = serde_json::to_vec(payload)?;
+    request.message.payload = json;
 
-        self.socket.connect(SERVER_URL, SERVER_PORT).await?;
+    socket.connect(SERVER_URL, SERVER_PORT).await?;
 
-        self.socket.send(&request.message.to_bytes()?).await?;
+    socket.send(&request.message.to_bytes()?).await?;
 
-        self.socket.deactivate().await?;
+    socket.deactivate().await?;
+    link.deactivate().await?;
 
-        Ok(())
-    }
+    Ok(())
 }
+// }
 
 /// This function deletes a key or certificate from the nrf modem
 async fn key_delete(ty: CSMType) -> Result<(), Error> {

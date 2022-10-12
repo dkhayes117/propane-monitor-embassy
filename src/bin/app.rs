@@ -11,10 +11,9 @@ use embassy_nrf::pac::{REGULATORS, UARTE0, UARTE1};
 use embassy_nrf::saadc::{ChannelConfig, Config, Oversample, Saadc};
 use embassy_time::{Duration, Ticker, Timer};
 use futures::StreamExt;
-use nrf_modem::lte_link::LteLink;
 use nrf_modem::{ConnectionPreference, SystemMode};
 use propane_monitor_embassy as lib;
-use propane_monitor_embassy::{Dtls, Error, Payload, TankLevel};
+use propane_monitor_embassy::*;
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -48,15 +47,15 @@ async fn main(_spawner: Spawner) {
     uarte1.enable.write(|w| w.enable().disabled());
 
     // Initialize heap data
-    lib::alloc_init();
+    alloc_init();
 
     // Run our sampling program, will not return unless an error occurs
     match run().await {
-        Ok(()) => lib::exit(),
+        Ok(()) => exit(),
         Err(e) => {
             // If we get here, we have problems, reboot device
             info!("{:?}", defmt::Debug2Format(&e));
-            lib::exit();
+            exit();
         }
     }
 }
@@ -89,6 +88,9 @@ async fn run() -> Result<(), Error> {
     // Hall effect sensor power, must be High Drive to provide enough current (6 mA)
     let mut hall_effect = Output::new(p.P0_31, Level::Low, OutputDrive::Disconnect0HighDrive1);
 
+    // blue LED to blink when data is being transmitted on Conexio Stratus
+    let mut blue_led = Output::new(p.P0_03, Level::High, OutputDrive::Standard);
+
     // Initialize modem
     unwrap!(
         nrf_modem::init(SystemMode {
@@ -101,15 +103,12 @@ async fn run() -> Result<(), Error> {
     );
 
     // install PSK info for secure cloud connectivity
-    lib::install_psk_id_and_psk().await?;
-
-    // Create our LTE Link and connect with a 30 second timeout
-    info!("Creating LTE Link");
-    let link = LteLink::new().await?;
-    embassy_time::with_timeout(Duration::from_secs(1800), link.wait_for_link()).await??;
+    install_psk_id_and_psk().await?;
 
     loop {
         let mut buf = [0; 1];
+
+        // gnss_data().await?;
 
         // Power up the hall sensor: max power on time = 330us
         hall_effect.set_high();
@@ -127,13 +126,17 @@ async fn run() -> Result<(), Error> {
             //     info!("ADC: {}", val);
             // }
             // info!("TankLevel: {}", core::mem::size_of::<TankLevel>());
-            info!("Creating DTLS socket");
-            let dtls = Dtls::new().await?;
+
+            // Visibly show that data is being sent
+            blue_led.set_low();
 
             info!("Transmitting data over CoAP");
-            dtls.transmit_payload(&payload).await?;
+            transmit_payload(&payload).await?;
+            // LTE link and dtls socket should go out of scope and be dropped here for power savings
 
             payload.data.clear();
+
+            blue_led.set_high();
         }
 
         ticker.next().await; // wait for next tick event
