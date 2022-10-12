@@ -11,7 +11,7 @@ use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::{info, Format};
 use embassy_nrf as _;
-use embassy_time::{Duration, TimeoutError};
+use embassy_time::TimeoutError;
 use heapless::{String, Vec};
 use nrf_modem::dtls_socket::{DtlsSocket, PeerVerification};
 use nrf_modem::lte_link::LteLink;
@@ -71,7 +71,7 @@ impl From<TimeoutError> for Error {
 /// Payload to send over CoAP (Heapless Vec of Tanklevel Structs)
 #[derive(Serialize)]
 pub struct Payload {
-    pub data: Vec<TankLevel,3>,
+    pub data: Vec<TankLevel, 1>,
 }
 
 impl Payload {
@@ -89,7 +89,7 @@ pub struct TankLevel {
 
 impl TankLevel {
     pub fn new(value: i16, timestamp: u32) -> Self {
-        TankLevel { value, timestamp  }
+        TankLevel { value, timestamp }
     }
 }
 
@@ -108,16 +108,6 @@ pub async fn gnss_data() -> Result<(), Error> {
 /// Create CoAP request, serialize payload, and transimt data
 /// request path can start with .s/ for LightDB Stream or .d/ LightDB State for Golioth IoT
 pub async fn transmit_payload(payload: &Payload) -> Result<(), Error> {
-    // Create our LTE Link and connect with a 30 second timeout
-    info!("Creating LTE Link");
-    let link = LteLink::new().await?;
-    embassy_time::with_timeout(
-        Duration::from_secs(30), link.wait_for_link()
-    ).await??;
-
-    info!("Creating DTLS socket");
-    let mut socket = DtlsSocket::new(PeerVerification::Enabled, &[SECURITY_TAG]).await?;
-
     let mut request: CoapRequest<DtlsSocket> = CoapRequest::new();
     // request.message.header.message_id = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
     request.set_method(RequestType::Post);
@@ -127,6 +117,13 @@ pub async fn transmit_payload(payload: &Payload) -> Result<(), Error> {
         .set_content_format(ContentFormat::ApplicationJSON);
     let json = serde_json::to_vec(payload)?;
     request.message.payload = json;
+
+    info!("Creating LTE Link");
+    let link = LteLink::new().await?;
+    link.wait_for_link().await?;
+
+    info!("Creating DTLS socket");
+    let mut socket = DtlsSocket::new(PeerVerification::Enabled, &[SECURITY_TAG]).await?;
 
     socket.connect(SERVER_URL, SERVER_PORT).await?;
 

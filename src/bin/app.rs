@@ -12,7 +12,7 @@ use embassy_nrf::saadc::{ChannelConfig, Config, Oversample, Saadc};
 use embassy_time::{Duration, Ticker, Timer};
 use futures::StreamExt;
 use nrf_modem::{ConnectionPreference, SystemMode};
-use propane_monitor_embassy as lib;
+// use propane_monitor_embassy as _;
 use propane_monitor_embassy::*;
 
 #[embassy_executor::main]
@@ -54,7 +54,7 @@ async fn main(_spawner: Spawner) {
         Ok(()) => exit(),
         Err(e) => {
             // If we get here, we have problems, reboot device
-            info!("{:?}", defmt::Debug2Format(&e));
+            info!("app exited: {:?}", defmt::Debug2Format(&e));
             exit();
         }
     }
@@ -131,14 +131,17 @@ async fn run() -> Result<(), Error> {
             blue_led.set_low();
 
             info!("Transmitting data over CoAP");
-            transmit_payload(&payload).await?;
+            embassy_time::with_timeout(Duration::from_secs(180), transmit_payload(&payload))
+                .await??;
             // LTE link and dtls socket should go out of scope and be dropped here for power savings
 
             payload.data.clear();
 
             blue_led.set_high();
+            break;
         }
 
         ticker.next().await; // wait for next tick event
     }
+    Ok(())
 }
