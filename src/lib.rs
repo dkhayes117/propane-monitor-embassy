@@ -212,10 +212,14 @@ fn encode_psk_as_hex(psk: &[u8]) -> String<128> {
 
 /// Convert sensor ADC value into tank level percentage
 pub fn convert_to_tank_level(x: i16) -> u8 {
-    let mut tank_level= ((0.05 * x as f32) - 38.68) as u8;
-    if tank_level < 0 { tank_level = 0};
-    if tank_level > 100 { tank_level = 100};
-    tank_level
+    let val = ((0.0529 * x as f32) - 38.6794) as u8;
+    if val > 100 {
+        100
+    } else if val < 10 {
+        10
+    } else {
+        val
+    }
 }
 
 /// Terminates the application and makes `probe-run` exit with exit-code = 0

@@ -27,7 +27,7 @@ async fn main(_spawner: Spawner) {
         [channel_config],
     );
 
-    let mut hall_effect = Output::new(p.P0_31, Level::High, OutputDrive::Disconnect0HighDrive1);
+    let _hall_effect = Output::new(p.P0_31, Level::High, OutputDrive::Disconnect0HighDrive1);
 
     let mut buf = [0; 1];
 
