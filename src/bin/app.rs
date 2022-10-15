@@ -89,15 +89,17 @@ async fn run() -> Result<(), Error> {
     let mut blue_led = Output::new(p.P0_03, Level::High, OutputDrive::Standard);
 
     // Initialize modem
-    unwrap!(
+    // unwrap!(
         nrf_modem::init(SystemMode {
             lte_support: true,
             nbiot_support: false,
             gnss_support: true,
             preference: ConnectionPreference::Lte,
         })
-        .await
-    );
+        .await?;
+    // );
+
+    // config_gnss().await?;
 
     // install PSK info for secure cloud connectivity
     install_psk_id_and_psk().await?;
@@ -108,7 +110,7 @@ async fn run() -> Result<(), Error> {
     loop {
         let mut buf = [0; 1];
 
-        // gnss_data().await?;
+        // get_gnss_data().await?;
 
         // Power up the hall sensor: max power on time = 330us
         hall_effect.set_high();
@@ -118,7 +120,7 @@ async fn run() -> Result<(), Error> {
 
         hall_effect.set_low();
 
-        payload.data.push(TankLevel::new(buf[0], 1987)).unwrap();
+        payload.data.push(TankLevel::new(convert_to_tank_level(buf[0]), 1987)).unwrap();
 
         // Our payload data buff is full, send to the cloud, clear the buffer
         if payload.data.is_full() {
@@ -127,17 +129,18 @@ async fn run() -> Result<(), Error> {
             // }
             // info!("TankLevel: {}", core::mem::size_of::<TankLevel>());
 
+            payload.msg_number += 1;
             // Visibly show that data is being sent
             blue_led.set_low();
 
             info!("Transmitting data over CoAP");
-            // If timeout occurs log a timeout and continue.
-            if let Err(e) = embassy_time::with_timeout(Duration::from_secs(30), transmit_payload(&payload))
+            // If timeout occurs, log a timeout and continue.
+            if let Ok(_) = embassy_time::with_timeout(Duration::from_secs(30), transmit_payload(&payload))
                 .await {
-                payload.timeouts += 1;
-                info!("{} has occurred {} time(s), data clear and start over", e, payload.timeouts);
-            } else {
                 payload.timeouts = 0;
+            } else {
+                payload.timeouts += 1;
+                info!("Timeout has occurred {} time(s), data clear and start over", payload.timeouts);
             }
 
             payload.data.clear();

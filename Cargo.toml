@@ -21,7 +21,7 @@ embassy-time = { version = "0.1.0", features = ["defmt", "defmt-timestamp-uptime
 embassy-nrf = { version = "0.1.0", features = ["defmt", "nrf9160-ns", "time-driver-rtc1", "gpiote", "unstable-pac"] }
 futures = { version = "0.3.17", default-features = false, features = ["async-await"] }
 heapless = { version = "0.7.16", features = ["serde"] }
-nrf-modem = { git = "https://github.com/diondokter/nrf-modem.git", features = ["defmt"] }
+nrf-modem = { git = "https://github.com/diondokter/nrf-modem.git" }
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }

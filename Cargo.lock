@@ -32,9 +32,6 @@ name = "at-commands"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd16d11eaba1d552aedbcd21bbade28ac578ad75e7df04b90f4c52e18420e4b8"
-dependencies = [
- "defmt",
-]
 
 [[package]]
 name = "atomic-polyfill"
@@ -831,7 +828,6 @@ dependencies = [
  "at-commands",
  "cortex-m",
  "critical-section 1.1.0",
- "defmt",
  "embedded-io",
  "futures",
  "linked_list_allocator 0.10.3",

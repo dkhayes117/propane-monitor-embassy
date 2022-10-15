@@ -69,39 +69,48 @@ impl From<TimeoutError> for Error {
 }
 
 /// Payload to send over CoAP (Heapless Vec of Tanklevel Structs)
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct Payload {
     pub data: Vec<TankLevel, 3>,
+    pub msg_number: u8,
     pub timeouts: u8,
 }
 
 impl Payload {
     pub fn new() -> Self {
-        Payload { data: Vec::new(), timeouts: 0 }
+        Payload { data: Vec::new(), msg_number: 0, timeouts: 0 }
     }
 }
 
 /// Structure to hold our individual measure data
 #[derive(Debug, Serialize)]
 pub struct TankLevel {
-    pub value: i16,
+    pub value: u8,
     pub timestamp: u32,
 }
 
 impl TankLevel {
-    pub fn new(value: i16, timestamp: u32) -> Self {
+    pub fn new(value: u8, timestamp: u32) -> Self {
         TankLevel { value, timestamp }
     }
 }
 
+pub async fn config_gnss() -> Result<(), Error> {
+    // confgiure MAGPIO pins for GNSS
+    info!("Configuring XMAGPIO pins for 1574-1577 MHz");
+    nrf_modem::at::send_at::<0>("AT%XMAGPIO=1,0,0,1,1,1574,1577").await?;
+    nrf_modem::at::send_at::<0>("AT%XCOEXO=1,1,1574,1577").await?;
+    Ok(())
+}
+
 /// Function to retrieve GPS data from a single GNSS fix
-pub async fn gnss_data() -> Result<(), Error> {
-    nrf_modem::configure_gnss_on_pca10090ns().await?;
+pub async fn get_gnss_data() -> Result<(), Error> {
     let mut gnss = nrf_modem::gnss::Gnss::new().await?;
     let config = nrf_modem::gnss::GnssConfig::default();
     let mut iter = gnss.start_single_fix(config)?;
+
     if let Some(x) = futures::StreamExt::next(&mut iter).await {
-        defmt::println!("{:?}", defmt::Debug2Format(&x));
+        info!("{:?}", defmt::Debug2Format(&x.unwrap()));
     }
     Ok(())
 }
@@ -117,7 +126,8 @@ pub async fn transmit_payload(payload: &Payload) -> Result<(), Error> {
         .message
         .set_content_format(ContentFormat::ApplicationJSON);
     let json = serde_json::to_vec(payload)?;
-    info!("Payload: {:?}", Debug2Format(&json));
+    info!("Payload: {:?}", Debug2Format(&payload));
+    info!("JSON Byte Vec: {:?}", Debug2Format(&json));
     request.message.payload = json;
 
     // Establish an LTE link
@@ -198,6 +208,14 @@ fn encode_psk_as_hex(psk: &[u8]) -> String<128> {
     }
 
     s
+}
+
+/// Convert sensor ADC value into tank level percentage
+pub fn convert_to_tank_level(x: i16) -> u8 {
+    let mut tank_level= ((0.05 * x as f32) - 38.68) as u8;
+    if tank_level < 0 { tank_level = 0};
+    if tank_level > 100 { tank_level = 100};
+    tank_level
 }
 
 /// Terminates the application and makes `probe-run` exit with exit-code = 0

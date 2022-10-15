@@ -4,6 +4,7 @@
 
 use defmt::info;
 use embassy_executor::Spawner;
+use embassy_nrf::gpio::{Level, Output, OutputDrive};
 use embassy_nrf::interrupt;
 use embassy_nrf::pwm::{Prescaler, SimplePwm};
 use embassy_nrf::saadc::{ChannelConfig, Config, Oversample, Saadc};
@@ -13,7 +14,7 @@ use propane_monitor_embassy as _;
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     let mut p = embassy_nrf::init(Default::default());
-    let mut pwm = SimplePwm::new_1ch(p.PWM0, p.P0_31);
+    let mut pwm = SimplePwm::new_1ch(p.PWM0, p.P0_10);
 
     let mut adc_config = Config::default();
     adc_config.oversample = Oversample::OVER8X;
@@ -25,6 +26,9 @@ async fn main(_spawner: Spawner) {
         adc_config,
         [channel_config],
     );
+
+    let mut hall_effect = Output::new(p.P0_31, Level::High, OutputDrive::Disconnect0HighDrive1);
+
     let mut buf = [0; 1];
 
     // most servos require 50hz or 20ms period
