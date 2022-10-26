@@ -9,9 +9,9 @@ use coap_lite::{CoapRequest, ContentFormat, RequestType};
 use core::fmt::write;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
-use defmt::{info, Format,Debug2Format};
+use defmt::{info, Debug2Format, Format};
 use embassy_nrf as _;
-use embassy_time::TimeoutError;
+use embassy_time::{Duration, TimeoutError, Timer};
 use heapless::{String, Vec};
 use nrf_modem::dtls_socket::{DtlsSocket, PeerVerification};
 use nrf_modem::lte_link::LteLink;
@@ -78,7 +78,11 @@ pub struct Payload {
 
 impl Payload {
     pub fn new() -> Self {
-        Payload { data: Vec::new(), msg_number: 0, timeouts: 0 }
+        Payload {
+            data: Vec::new(),
+            msg_number: 0,
+            timeouts: 0,
+        }
     }
 }
 
@@ -126,8 +130,8 @@ pub async fn transmit_payload(payload: &Payload) -> Result<(), Error> {
         .message
         .set_content_format(ContentFormat::ApplicationJSON);
     let json = serde_json::to_vec(payload)?;
-    info!("Payload: {:?}", Debug2Format(&payload));
-    info!("JSON Byte Vec: {:?}", Debug2Format(&json));
+    // info!("Payload: {:?}", Debug2Format(&payload));
+    // info!("JSON Byte Vec: {:?}", Debug2Format(&json));
     request.message.payload = json;
 
     // Establish an LTE link
@@ -140,6 +144,9 @@ pub async fn transmit_payload(payload: &Payload) -> Result<(), Error> {
     socket.connect(SERVER_URL, SERVER_PORT).await?;
 
     socket.send(&request.message.to_bytes()?).await?;
+
+    // let sig_strength = nrf_modem::at::send_at::<32>("AT+CESQ").await?;
+    // info!("Signal Strength: {:?}", Debug2Format(&sig_strength));
 
     // The sockets would be dropped after the function call ends, but this explicit call allows them
     // to be dropped asynchronously

@@ -8,7 +8,6 @@ use embassy_nrf::gpio::{Flex, Level, Output, OutputDrive};
 use embassy_nrf::interrupt::{self, InterruptExt, Priority};
 use embassy_nrf::pac::{REGULATORS, UARTE0, UARTE1};
 use embassy_nrf::Peripherals;
-use embassy_nrf::pwm::SimplePwm;
 // use embassy_nrf::pwm::{Prescaler, SimplePwm};
 use embassy_nrf::saadc::{ChannelConfig, Config, Oversample, Saadc};
 use embassy_time::{Duration, Ticker, Timer};
@@ -68,10 +67,9 @@ async fn run() -> Result<(), Error> {
 
     // Disable on-board sensors for low power
     Flex::new(&mut p.P0_29).set_as_disconnected();
-    // Flex::new(&mut p.P0_11).set_as_disconnected();
 
     // Create our sleep timer (time between sensor measurements)
-    let mut ticker = Ticker::every(Duration::from_secs(15));
+    let mut ticker = Ticker::every(Duration::from_secs(30));
 
     // Configuration of ADC, over sample to reduce noise (8x)
     let mut adc_config = Config::default();
@@ -89,23 +87,25 @@ async fn run() -> Result<(), Error> {
     let mut hall_effect = Output::new(p.P0_31, Level::Low, OutputDrive::Disconnect0HighDrive1);
 
     // blue LED to power when data is being transmitted on Conexio Stratus
-    let mut led_pwm = SimplePwm::new_1ch(p.PWM0, p.P0_03);
-    led_pwm.set_prescaler(Prescaler::Div1);
-    led_pwm.set_max_duty(32767);
-    led_pwm.set_duty(0,0);
-    // let mut blue_led = Output::new(p.P0_03, Level::High, OutputDrive::Standard);
+    let mut led = Output::new(p.P0_03, Level::High, OutputDrive::Standard);
+    // Use PWM control to reduce current
+    // let mut led_pwm = SimplePwm::new_1ch(p.PWM0, p.P0_03);
+    // led_pwm.set_prescaler(Prescaler::Div1);
+    // led_pwm.set_max_duty(32767);
+    // led_pwm.set_duty(0,0);
+    // led_pwm.disable();
 
-    // Initialize modem
-    // unwrap!(
+    // Initialize cellular modem
+    unwrap!(
         nrf_modem::init(SystemMode {
             lte_support: true,
             nbiot_support: false,
             gnss_support: true,
             preference: ConnectionPreference::Lte,
-        })
-        .await?;
-    // );
+        }).await
+    );
 
+    // Initialize modem
     // config_gnss().await?;
 
     // install PSK info for secure cloud connectivity
@@ -118,7 +118,6 @@ async fn run() -> Result<(), Error> {
         let mut buf = [0; 1];
 
         // get_gnss_data().await?;
-
         // Power up the hall sensor: max power on time = 330us
         hall_effect.set_high();
         Timer::after(Duration::from_micros(500)).await;
@@ -127,7 +126,10 @@ async fn run() -> Result<(), Error> {
 
         hall_effect.set_low();
 
-        payload.data.push(TankLevel::new(convert_to_tank_level(buf[0]), 1987)).unwrap();
+        payload
+            .data
+            .push(TankLevel::new(convert_to_tank_level(buf[0]), 1987))
+            .unwrap();
 
         // Our payload data buff is full, send to the cloud, clear the buffer
         if payload.data.is_full() {
@@ -137,24 +139,33 @@ async fn run() -> Result<(), Error> {
             // info!("TankLevel: {}", core::mem::size_of::<TankLevel>());
 
             payload.msg_number += 1;
-            // Visibly show that data is being sent
-            // blue_led.set_low();
-            led_pwm.set_duty(0,5000);
 
-            info!("Transmitting data over CoAP");
+            // Visibly show that data is being sent
+            led.set_low();
+            // led_pwm.set_duty(0,2500);
+            // led_pwm.enable();
+
+            // info!("Transmitting data over CoAP");
+
             // If timeout occurs, log a timeout and continue.
-            if let Ok(_) = embassy_time::with_timeout(Duration::from_secs(30), transmit_payload(&payload))
-                .await {
+            if let Ok(_) =
+                embassy_time::with_timeout(Duration::from_secs(30), transmit_payload(&payload))
+                    .await
+            {
                 payload.timeouts = 0;
             } else {
                 payload.timeouts += 1;
-                info!("Timeout has occurred {} time(s), data clear and start over", payload.timeouts);
+                info!(
+                    "Timeout has occurred {} time(s), data clear and start over",
+                    payload.timeouts
+                );
             }
 
             payload.data.clear();
 
-            // blue_led.set_high();
-            led_pwm.set_duty(0,0);
+            led.set_high();
+            // led_pwm.set_duty(0,0);
+            // led_pwm.disable();
         }
 
         ticker.next().await; // wait for next tick event

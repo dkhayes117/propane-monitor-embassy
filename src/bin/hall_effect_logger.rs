@@ -33,7 +33,7 @@ async fn main(_spawner: Spawner) {
 
     // most servos require 50hz or 20ms period
     // set_period can only set down to 125khz so we cant use it directly
-    // Div128 is 125khz or 0.000008s or 0.008ms, 20/0.008 is 2500 is top
+    // Div128 is 125khz or 0.000008s or 0.008ms, 20/0.008 = 2500 which is top value
     pwm.set_prescaler(Prescaler::Div128);
     pwm.set_max_duty(2500);
     info!("pwm initialized!");
