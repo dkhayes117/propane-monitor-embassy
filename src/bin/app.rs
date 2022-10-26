@@ -83,8 +83,19 @@ async fn run() -> Result<(), Error> {
         [channel_config],
     );
 
+    let bat_channel_config = ChannelConfig::single_ended(&mut p.P0_20);
+    let mut battery = Saadc::new(
+        p.SAADC,
+        interrupt::take!(SAADC),
+        adc_config,
+        [bat_channel_config],
+    );
+
     // Hall effect sensor power, must be High Drive to provide enough current (6 mA)
     let mut hall_effect = Output::new(p.P0_31, Level::Low, OutputDrive::Disconnect0HighDrive1);
+
+    // Pin to control VBAT_MEAS_EN
+    let mut enable_bat_meas = Output::new(p.P0_25, Level::Low, OutputDrive::Standard);
 
     // blue LED to power when data is being transmitted on Conexio Stratus
     let mut led = Output::new(p.P0_03, Level::High, OutputDrive::Standard);
@@ -133,6 +144,14 @@ async fn run() -> Result<(), Error> {
 
         // Our payload data buff is full, send to the cloud, clear the buffer
         if payload.data.is_full() {
+            // Get battery level
+            enable_bat_meas.set_high();
+
+            battery.sample(&mut buf).await;
+            payload.battery = buf[0];
+
+            enable_bat_meas.set_low();
+
             info!("Transmitting data over CoAP");
             // for val in &tank_level.data {
             //     info!("ADC: {}", val);

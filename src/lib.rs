@@ -72,6 +72,7 @@ impl From<TimeoutError> for Error {
 /// Payload to send over CoAP (Heapless Vec of Tanklevel Structs)
 #[derive(Debug, Serialize)]
 pub struct Payload {
+    pub battery: u32,
     pub data: Vec<TankLevel, 6>,
     pub signal: i32,
     pub timeouts: u8,
@@ -80,6 +81,7 @@ pub struct Payload {
 impl Payload {
     pub fn new() -> Self {
         Payload {
+            battery: 0,
             data: Vec::new(),
             signal: 0,
             timeouts: 0,
