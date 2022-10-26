@@ -133,23 +133,20 @@ async fn run() -> Result<(), Error> {
 
         // Our payload data buff is full, send to the cloud, clear the buffer
         if payload.data.is_full() {
+            info!("Transmitting data over CoAP");
             // for val in &tank_level.data {
             //     info!("ADC: {}", val);
             // }
             // info!("TankLevel: {}", core::mem::size_of::<TankLevel>());
-
-            payload.msg_number += 1;
 
             // Visibly show that data is being sent
             led.set_low();
             // led_pwm.set_duty(0,2500);
             // led_pwm.enable();
 
-            // info!("Transmitting data over CoAP");
-
             // If timeout occurs, log a timeout and continue.
             if let Ok(_) =
-                embassy_time::with_timeout(Duration::from_secs(30), transmit_payload(&payload))
+                embassy_time::with_timeout(Duration::from_secs(30), transmit_payload(&mut payload))
                     .await
             {
                 payload.timeouts = 0;

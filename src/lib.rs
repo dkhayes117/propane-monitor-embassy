@@ -9,6 +9,7 @@ use coap_lite::{CoapRequest, ContentFormat, RequestType};
 use core::fmt::write;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
+use at_commands::parser::CommandParser;
 use defmt::{info, Debug2Format, Format};
 use embassy_nrf as _;
 use embassy_time::{Duration, TimeoutError, Timer};
@@ -71,8 +72,8 @@ impl From<TimeoutError> for Error {
 /// Payload to send over CoAP (Heapless Vec of Tanklevel Structs)
 #[derive(Debug, Serialize)]
 pub struct Payload {
-    pub data: Vec<TankLevel, 3>,
-    pub msg_number: u8,
+    pub data: Vec<TankLevel, 6>,
+    pub signal: i32,
     pub timeouts: u8,
 }
 
@@ -80,7 +81,7 @@ impl Payload {
     pub fn new() -> Self {
         Payload {
             data: Vec::new(),
-            msg_number: 0,
+            signal: 0,
             timeouts: 0,
         }
     }
@@ -121,7 +122,16 @@ pub async fn get_gnss_data() -> Result<(), Error> {
 
 /// Create CoAP request, serialize payload, and transimt data
 /// request path can start with .s/ for LightDB Stream or .d/ LightDB State for Golioth IoT
-pub async fn transmit_payload(payload: &Payload) -> Result<(), Error> {
+pub async fn transmit_payload(payload: &mut Payload) -> Result<(), Error> {
+    // Establish an LTE link
+    let link = LteLink::new().await?;
+    link.wait_for_link().await?;
+
+    let sig_strength = get_signal_strength().await?;
+    payload.signal = sig_strength;
+    info!("Signal Strength: {} dBm", &sig_strength);
+
+
     let mut request: CoapRequest<DtlsSocket> = CoapRequest::new();
     // request.message.header.message_id = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
     request.set_method(RequestType::Post);
@@ -134,19 +144,12 @@ pub async fn transmit_payload(payload: &Payload) -> Result<(), Error> {
     // info!("JSON Byte Vec: {:?}", Debug2Format(&json));
     request.message.payload = json;
 
-    // Establish an LTE link
-    let link = LteLink::new().await?;
-    link.wait_for_link().await?;
-
     // Create our DTLS socket
     let mut socket = DtlsSocket::new(PeerVerification::Enabled, &[SECURITY_TAG]).await?;
 
     socket.connect(SERVER_URL, SERVER_PORT).await?;
 
     socket.send(&request.message.to_bytes()?).await?;
-
-    // let sig_strength = nrf_modem::at::send_at::<32>("AT+CESQ").await?;
-    // info!("Signal Strength: {:?}", Debug2Format(&sig_strength));
 
     // The sockets would be dropped after the function call ends, but this explicit call allows them
     // to be dropped asynchronously
@@ -227,6 +230,26 @@ pub fn convert_to_tank_level(x: i16) -> u8 {
     } else {
         val
     }
+}
+
+/// Parse AT+CESQ command response and return a signal strength in dBm
+/// Signal strength = -140 dBm + last int_parameter
+async fn get_signal_strength() -> Result<i32, Error> {
+    let command = nrf_modem::at::send_at::<32>("AT+CESQ").await?;
+
+    let _cereg = CommandParser::parse(command.as_bytes())
+        .expect_identifier(b"+CESQ:")
+        .expect_int_parameter()
+        .expect_int_parameter()
+        .expect_int_parameter()
+        .expect_int_parameter()
+        .expect_int_parameter()
+        .expect_int_parameter()
+        .expect_identifier(b"\r\nOK\r\n")
+        .finish()
+        .map(|(_, _, _, _, _, signal)| signal);
+
+    -140 + signal
 }
 
 /// Terminates the application and makes `probe-run` exit with exit-code = 0
