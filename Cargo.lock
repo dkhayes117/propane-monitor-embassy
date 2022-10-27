@@ -32,9 +32,6 @@ name = "at-commands"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd16d11eaba1d552aedbcd21bbade28ac578ad75e7df04b90f4c52e18420e4b8"
-dependencies = [
- "defmt",
-]
 
 [[package]]
 name = "atomic-polyfill"
@@ -327,6 +324,16 @@ name = "defmt-parser"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0db23d29972d99baa3de2ee2ae3f104c10564a6d05a346eb3f4c4f2c0525a06e"
+
+[[package]]
+name = "defmt-rtt"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d2cbbbd58847d508d97629b32cd9730a2d28532f71e219714614406029f18b1"
+dependencies = [
+ "critical-section 0.2.7",
+ "defmt",
+]
 
 [[package]]
 name = "either"
@@ -821,7 +828,6 @@ dependencies = [
  "at-commands",
  "cortex-m",
  "critical-section 1.1.0",
- "defmt",
  "embedded-io",
  "futures",
  "linked_list_allocator 0.10.3",
@@ -963,6 +969,7 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "defmt",
+ "defmt-rtt",
  "embassy-executor",
  "embassy-futures",
  "embassy-nrf",

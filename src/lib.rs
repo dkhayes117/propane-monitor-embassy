@@ -9,7 +9,7 @@ use coap_lite::{CoapRequest, ContentFormat, RequestType};
 use core::fmt::write;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
-use at_commands::parser::CommandParser;
+use at_commands::parser::{CommandParser, ParseError};
 use defmt::{info, Debug2Format, Format};
 use embassy_nrf as _;
 use embassy_time::{Duration, TimeoutError, Timer};
@@ -43,6 +43,7 @@ pub enum Error {
     Json(serde_json::error::Error),
     NrfModem(nrf_modem::error::Error),
     Timeout(TimeoutError),
+    ParseError(ParseError),
 }
 
 impl From<MessageError> for Error {
@@ -69,11 +70,16 @@ impl From<TimeoutError> for Error {
     }
 }
 
+impl From<ParseError> for Error {
+    fn from(e: ParseError) -> Self {
+        Self::ParseError(e)
+    }
+}
+
 /// Payload to send over CoAP (Heapless Vec of Tanklevel Structs)
 #[derive(Debug, Serialize)]
 pub struct Payload {
-    pub battery: u32,
-    pub data: Vec<TankLevel, 6>,
+    pub data: Vec<TankLevel, 2>,
     pub signal: i32,
     pub timeouts: u8,
 }
@@ -81,7 +87,6 @@ pub struct Payload {
 impl Payload {
     pub fn new() -> Self {
         Payload {
-            battery: 0,
             data: Vec::new(),
             signal: 0,
             timeouts: 0,
@@ -94,11 +99,12 @@ impl Payload {
 pub struct TankLevel {
     pub value: u8,
     pub timestamp: u32,
+    pub battery: u32,
 }
 
 impl TankLevel {
-    pub fn new(value: u8, timestamp: u32) -> Self {
-        TankLevel { value, timestamp }
+    pub fn new(value: u8, timestamp: u32, battery: u32) -> Self {
+        TankLevel { value, timestamp, battery }
     }
 }
 
@@ -125,14 +131,9 @@ pub async fn get_gnss_data() -> Result<(), Error> {
 /// Create CoAP request, serialize payload, and transimt data
 /// request path can start with .s/ for LightDB Stream or .d/ LightDB State for Golioth IoT
 pub async fn transmit_payload(payload: &mut Payload) -> Result<(), Error> {
-    // Establish an LTE link
-    let link = LteLink::new().await?;
-    link.wait_for_link().await?;
-
-    let sig_strength = get_signal_strength().await?;
-    payload.signal = sig_strength;
-    info!("Signal Strength: {} dBm", &sig_strength);
-
+    // let sig_strength = get_signal_strength().await?;
+    // payload.signal = sig_strength;
+    // info!("Signal Strength: {} dBm", &sig_strength);
 
     let mut request: CoapRequest<DtlsSocket> = CoapRequest::new();
     // request.message.header.message_id = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -142,9 +143,13 @@ pub async fn transmit_payload(payload: &mut Payload) -> Result<(), Error> {
         .message
         .set_content_format(ContentFormat::ApplicationJSON);
     let json = serde_json::to_vec(payload)?;
-    // info!("Payload: {:?}", Debug2Format(&payload));
-    // info!("JSON Byte Vec: {:?}", Debug2Format(&json));
+    info!("Payload: {:?}", Debug2Format(payload));
+    info!("JSON Byte Vec: {:?}", Debug2Format(&json));
     request.message.payload = json;
+
+    // Establish an LTE link
+    let link = LteLink::new().await?;
+    link.wait_for_link().await?;
 
     // Create our DTLS socket
     let mut socket = DtlsSocket::new(PeerVerification::Enabled, &[SECURITY_TAG]).await?;
@@ -239,7 +244,7 @@ pub fn convert_to_tank_level(x: i16) -> u8 {
 async fn get_signal_strength() -> Result<i32, Error> {
     let command = nrf_modem::at::send_at::<32>("AT+CESQ").await?;
 
-    let _cereg = CommandParser::parse(command.as_bytes())
+    let (_,_,_,_,_,mut signal) = CommandParser::parse(command.as_bytes())
         .expect_identifier(b"+CESQ:")
         .expect_int_parameter()
         .expect_int_parameter()
@@ -247,11 +252,13 @@ async fn get_signal_strength() -> Result<i32, Error> {
         .expect_int_parameter()
         .expect_int_parameter()
         .expect_int_parameter()
-        .expect_identifier(b"\r\nOK\r\n")
+        .expect_identifier(b"\r\n")
         .finish()
-        .map(|(_, _, _, _, _, signal)| signal);
-
-    -140 + signal
+        .unwrap();
+    if signal != 255 {
+        signal += -140;
+    }
+    Ok(signal)
 }
 
 /// Terminates the application and makes `probe-run` exit with exit-code = 0

@@ -7,7 +7,6 @@ use embassy_executor::Spawner;
 use embassy_nrf::gpio::{Flex, Level, Output, OutputDrive};
 use embassy_nrf::interrupt::{self, InterruptExt, Priority};
 use embassy_nrf::pac::{REGULATORS, UARTE0, UARTE1};
-use embassy_nrf::Peripherals;
 // use embassy_nrf::pwm::{Prescaler, SimplePwm};
 use embassy_nrf::saadc::{ChannelConfig, Config, Oversample, Saadc};
 use embassy_time::{Duration, Ticker, Timer};
@@ -69,32 +68,25 @@ async fn run() -> Result<(), Error> {
     Flex::new(&mut p.P0_29).set_as_disconnected();
 
     // Create our sleep timer (time between sensor measurements)
-    let mut ticker = Ticker::every(Duration::from_secs(30));
+    let mut ticker = Ticker::every(Duration::from_secs(15));
 
     // Configuration of ADC, over sample to reduce noise (8x)
     let mut adc_config = Config::default();
     adc_config.oversample = Oversample::OVER8X;
 
-    let channel_config = ChannelConfig::single_ended(&mut p.P0_14);
+    let sensor_channel = ChannelConfig::single_ended(&mut p.P0_14);
+    let bat_channel = ChannelConfig::single_ended(&mut p.P0_20);
     let mut adc = Saadc::new(
         p.SAADC,
         interrupt::take!(SAADC),
         adc_config,
-        [channel_config],
-    );
-
-    let bat_channel_config = ChannelConfig::single_ended(&mut p.P0_20);
-    let mut battery = Saadc::new(
-        p.SAADC,
-        interrupt::take!(SAADC),
-        adc_config,
-        [bat_channel_config],
+        [sensor_channel, bat_channel],
     );
 
     // Hall effect sensor power, must be High Drive to provide enough current (6 mA)
     let mut hall_effect = Output::new(p.P0_31, Level::Low, OutputDrive::Disconnect0HighDrive1);
 
-    // Pin to control VBAT_MEAS_EN
+    // Pin to control VBAT_MEAS_EN, Power must connect to V_Bat to measure correctly
     let mut enable_bat_meas = Output::new(p.P0_25, Level::Low, OutputDrive::Standard);
 
     // blue LED to power when data is being transmitted on Conexio Stratus
@@ -107,14 +99,14 @@ async fn run() -> Result<(), Error> {
     // led_pwm.disable();
 
     // Initialize cellular modem
-    unwrap!(
+    // unwrap!(
         nrf_modem::init(SystemMode {
             lte_support: true,
             nbiot_support: false,
             gnss_support: true,
             preference: ConnectionPreference::Lte,
-        }).await
-    );
+        }).await?;
+    // );
 
     // Initialize modem
     // config_gnss().await?;
@@ -126,32 +118,29 @@ async fn run() -> Result<(), Error> {
     let mut payload = Payload::new();
 
     loop {
-        let mut buf = [0; 1];
+        let mut buf = [0; 2];
 
         // get_gnss_data().await?;
         // Power up the hall sensor: max power on time = 330us
         hall_effect.set_high();
+        enable_bat_meas.set_high();
         Timer::after(Duration::from_micros(500)).await;
 
         adc.sample(&mut buf).await;
 
         hall_effect.set_low();
+        enable_bat_meas.set_low();
+        info!("Battery: {} ADC", &buf[1]);
+        info!("Battery: {} mV", (((&buf[1] * 2) as u32 * 3600) / 4096));
 
         payload
             .data
-            .push(TankLevel::new(convert_to_tank_level(buf[0]), 1987))
+            .push(TankLevel::new(
+                convert_to_tank_level(buf[0]), 1987, ((&buf[1] * 2) as u32 * 3600) / 4096 ))
             .unwrap();
 
         // Our payload data buff is full, send to the cloud, clear the buffer
         if payload.data.is_full() {
-            // Get battery level
-            enable_bat_meas.set_high();
-
-            battery.sample(&mut buf).await;
-            payload.battery = buf[0];
-
-            enable_bat_meas.set_low();
-
             info!("Transmitting data over CoAP");
             // for val in &tank_level.data {
             //     info!("ADC: {}", val);

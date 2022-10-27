@@ -9,7 +9,7 @@ use propane_monitor_embassy as _;
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    let mut p = embassy_nrf::init(Default::default());
+    let p = embassy_nrf::init(Default::default());
 
     let mut led_pwm = SimplePwm::new_1ch(p.PWM0, p.P0_03);
     led_pwm.set_prescaler(Prescaler::Div1);
