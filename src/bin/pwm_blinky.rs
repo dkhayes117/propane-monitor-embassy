@@ -14,12 +14,12 @@ async fn main(_spawner: Spawner) {
     let mut led_pwm = SimplePwm::new_1ch(p.PWM0, p.P0_03);
     led_pwm.set_prescaler(Prescaler::Div1);
     led_pwm.set_max_duty(32767);
-    led_pwm.set_duty(0,0);
+    led_pwm.set_duty(0, 0);
 
     loop {
-        led_pwm.set_duty(0,0);
+        led_pwm.set_duty(0, 0);
         Timer::after(Duration::from_millis(500)).await;
-        led_pwm.set_duty(0,2500);
+        led_pwm.set_duty(0, 2500);
         Timer::after(Duration::from_millis(500)).await;
     }
 }

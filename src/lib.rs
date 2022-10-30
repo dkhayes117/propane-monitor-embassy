@@ -116,7 +116,7 @@ impl TankLevel {
 
 pub async fn config_gnss() -> Result<(), Error> {
     // confgiure MAGPIO pins for GNSS
-    // info!("Configuring XMAGPIO pins for 1574-1577 MHz");
+    info!("Configuring XMAGPIO pins for 1574-1577 MHz");
     nrf_modem::at::send_at::<0>("AT%XMAGPIO=1,0,0,1,1,1574,1577").await?;
     nrf_modem::at::send_at::<0>("AT%XCOEXO=1,1,1574,1577").await?;
     Ok(())
@@ -129,7 +129,7 @@ pub async fn get_gnss_data() -> Result<(), Error> {
     let mut iter = gnss.start_single_fix(config)?;
 
     if let Some(x) = futures::StreamExt::next(&mut iter).await {
-        // info!("{:?}", defmt::Debug2Format(&x.unwrap()));
+        info!("{:?}", Debug2Format(&x.unwrap()));
     }
     Ok(())
 }
@@ -165,9 +165,9 @@ pub async fn transmit_payload(payload: &mut Payload<'_>) -> Result<(), Error> {
     info!("DTLS Socket connected");
     socket.send(&request.message.to_bytes()?).await?;
     info!("Payload done");
+
     // The sockets would be dropped after the function call ends, but this explicit call allows them
     // to be dropped asynchronously
-
     info!("deactivate sockets");
     socket.deactivate().await?;
     link.deactivate().await?;
