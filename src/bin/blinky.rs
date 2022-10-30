@@ -10,7 +10,7 @@ use propane_monitor_embassy as _;
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     let p = embassy_nrf::init(Default::default());
-    let mut led = Output::new(p.P0_03, Level::Low, OutputDrive::Standard);
+    let mut led = Output::new(p.P0_12, Level::Low, OutputDrive::Standard);
 
     loop {
         led.set_high();

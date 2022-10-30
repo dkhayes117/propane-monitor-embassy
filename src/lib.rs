@@ -4,12 +4,12 @@
 
 use crate::config::{PSK, PSK_ID, SECURITY_TAG, SERVER_PORT, SERVER_URL};
 use alloc_cortex_m::CortexMHeap;
+use at_commands::parser::{CommandParser, ParseError};
 use coap_lite::error::MessageError;
 use coap_lite::{CoapRequest, ContentFormat, RequestType};
 use core::fmt::write;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
-use at_commands::parser::{CommandParser, ParseError};
 use defmt::{info, Debug2Format, Format};
 use embassy_nrf as _;
 use embassy_time::{Duration, TimeoutError, Timer};
@@ -78,18 +78,20 @@ impl From<ParseError> for Error {
 
 /// Payload to send over CoAP (Heapless Vec of Tanklevel Structs)
 #[derive(Debug, Serialize)]
-pub struct Payload {
+pub struct Payload<'a> {
     pub data: Vec<TankLevel, 2>,
     pub signal: i32,
     pub timeouts: u8,
+    location: &'a str,
 }
 
-impl Payload {
+impl Payload<'_> {
     pub fn new() -> Self {
         Payload {
             data: Vec::new(),
             signal: 0,
             timeouts: 0,
+            location: "Lowes2",
         }
     }
 }
@@ -104,13 +106,17 @@ pub struct TankLevel {
 
 impl TankLevel {
     pub fn new(value: u8, timestamp: u32, battery: u32) -> Self {
-        TankLevel { value, timestamp, battery }
+        TankLevel {
+            value,
+            timestamp,
+            battery,
+        }
     }
 }
 
 pub async fn config_gnss() -> Result<(), Error> {
     // confgiure MAGPIO pins for GNSS
-    info!("Configuring XMAGPIO pins for 1574-1577 MHz");
+    // info!("Configuring XMAGPIO pins for 1574-1577 MHz");
     nrf_modem::at::send_at::<0>("AT%XMAGPIO=1,0,0,1,1,1574,1577").await?;
     nrf_modem::at::send_at::<0>("AT%XCOEXO=1,1,1574,1577").await?;
     Ok(())
@@ -123,17 +129,22 @@ pub async fn get_gnss_data() -> Result<(), Error> {
     let mut iter = gnss.start_single_fix(config)?;
 
     if let Some(x) = futures::StreamExt::next(&mut iter).await {
-        info!("{:?}", defmt::Debug2Format(&x.unwrap()));
+        // info!("{:?}", defmt::Debug2Format(&x.unwrap()));
     }
     Ok(())
 }
 
 /// Create CoAP request, serialize payload, and transimt data
 /// request path can start with .s/ for LightDB Stream or .d/ LightDB State for Golioth IoT
-pub async fn transmit_payload(payload: &mut Payload) -> Result<(), Error> {
-    // let sig_strength = get_signal_strength().await?;
-    // payload.signal = sig_strength;
-    // info!("Signal Strength: {} dBm", &sig_strength);
+pub async fn transmit_payload(payload: &mut Payload<'_>) -> Result<(), Error> {
+    // Establish an LTE link
+    let link = LteLink::new().await?;
+
+    link.wait_for_link().await?;
+
+    let sig_strength = get_signal_strength().await?;
+    payload.signal = sig_strength;
+    info!("Signal Strength: {} dBm", &sig_strength);
 
     let mut request: CoapRequest<DtlsSocket> = CoapRequest::new();
     // request.message.header.message_id = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -143,23 +154,21 @@ pub async fn transmit_payload(payload: &mut Payload) -> Result<(), Error> {
         .message
         .set_content_format(ContentFormat::ApplicationJSON);
     let json = serde_json::to_vec(payload)?;
-    info!("Payload: {:?}", Debug2Format(payload));
-    info!("JSON Byte Vec: {:?}", Debug2Format(&json));
+    // info!("Payload: {:?}", Debug2Format(payload));
+    // info!("JSON Byte Vec: {:?}", Debug2Format(&json));
     request.message.payload = json;
-
-    // Establish an LTE link
-    let link = LteLink::new().await?;
-    link.wait_for_link().await?;
 
     // Create our DTLS socket
     let mut socket = DtlsSocket::new(PeerVerification::Enabled, &[SECURITY_TAG]).await?;
-
+    info!("DTLS Socket created");
     socket.connect(SERVER_URL, SERVER_PORT).await?;
-
+    info!("DTLS Socket connected");
     socket.send(&request.message.to_bytes()?).await?;
-
+    info!("Payload done");
     // The sockets would be dropped after the function call ends, but this explicit call allows them
     // to be dropped asynchronously
+
+    info!("deactivate sockets");
     socket.deactivate().await?;
     link.deactivate().await?;
 
@@ -244,7 +253,7 @@ pub fn convert_to_tank_level(x: i16) -> u8 {
 async fn get_signal_strength() -> Result<i32, Error> {
     let command = nrf_modem::at::send_at::<32>("AT+CESQ").await?;
 
-    let (_,_,_,_,_,mut signal) = CommandParser::parse(command.as_bytes())
+    let (_, _, _, _, _, mut signal) = CommandParser::parse(command.as_bytes())
         .expect_identifier(b"+CESQ:")
         .expect_int_parameter()
         .expect_int_parameter()

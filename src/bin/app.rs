@@ -8,11 +8,10 @@ use embassy_nrf::gpio::{Flex, Level, Output, OutputDrive};
 use embassy_nrf::interrupt::{self, InterruptExt, Priority};
 use embassy_nrf::pac::{REGULATORS, UARTE0, UARTE1};
 // use embassy_nrf::pwm::{Prescaler, SimplePwm};
-use embassy_nrf::saadc::{ChannelConfig, Config, Oversample, Saadc};
+use embassy_nrf::saadc::{ChannelConfig, Config, Saadc};
 use embassy_time::{Duration, Ticker, Timer};
 use futures::StreamExt;
 use nrf_modem::{ConnectionPreference, SystemMode};
-// use propane_monitor_embassy as _;
 use propane_monitor_embassy::*;
 
 #[embassy_executor::main]
@@ -40,7 +39,7 @@ async fn main(_spawner: Spawner) {
     let regulators: REGULATORS = unsafe { core::mem::transmute(()) };
     regulators.dcdcen.modify(|_, w| w.dcdcen().enabled());
 
-    // Disable UARTE for lower power consumption
+    // // Disable UARTE for lower power consumption
     let uarte0: UARTE0 = unsafe { core::mem::transmute(()) };
     let uarte1: UARTE1 = unsafe { core::mem::transmute(()) };
     uarte0.enable.write(|w| w.enable().disabled());
@@ -53,7 +52,7 @@ async fn main(_spawner: Spawner) {
     match run().await {
         Ok(()) => exit(),
         Err(e) => {
-            // If we get here, we have problems, reboot device
+            // If we get here, we have problems
             info!("app exited: {:?}", defmt::Debug2Format(&e));
             exit();
         }
@@ -64,51 +63,59 @@ async fn run() -> Result<(), Error> {
     // Handle for device peripherals
     let mut p = embassy_nrf::init(Default::default());
 
-    // Disable on-board sensors for low power
+    // Stratus: Disable on-board sensors for low power
+    // Flex::new(&mut p.P0_25).set_as_disconnected();
+    // Flex::new(&mut p.P0_28).set_as_disconnected();
     Flex::new(&mut p.P0_29).set_as_disconnected();
 
-    // Create our sleep timer (time between sensor measurements)
-    let mut ticker = Ticker::every(Duration::from_secs(15));
-
     // Configuration of ADC, over sample to reduce noise (8x)
-    let mut adc_config = Config::default();
-    adc_config.oversample = Oversample::OVER8X;
+    let adc_config = Config::default();
+    // Oversample can only be used when you have a single channel
+    // adc_config.oversample = Oversample::OVER8X;
 
+    // Pin 14 can be used on both Stratus and Icarus boards for Analog Input
     let sensor_channel = ChannelConfig::single_ended(&mut p.P0_14);
+    // Stratus: Pin 20 for V_bat measurement
+    // Icarus: Pin 13 for V_bat measurement
     let bat_channel = ChannelConfig::single_ended(&mut p.P0_20);
+
     let mut adc = Saadc::new(
         p.SAADC,
         interrupt::take!(SAADC),
         adc_config,
         [sensor_channel, bat_channel],
     );
+    adc.calibrate().await;
+    info!("ADC Initialized");
+
+    // Icarus: Has an eSIM and an External SIM.  Use Pin 8 to select: HIGH = eSIM, Low = External
+    // Only change SIM selection while modem is off (AT+CFUN=1)
+    // let _sim_select = Output::new(p.P0_08, Level::Low, OutputDrive::Standard);
 
     // Hall effect sensor power, must be High Drive to provide enough current (6 mA)
     let mut hall_effect = Output::new(p.P0_31, Level::Low, OutputDrive::Disconnect0HighDrive1);
 
-    // Pin to control VBAT_MEAS_EN, Power must connect to V_Bat to measure correctly
-    let mut enable_bat_meas = Output::new(p.P0_25, Level::Low, OutputDrive::Standard);
+    // Stratus: Pin 25 to control VBAT_MEAS_EN, Power must connect to V_Bat to measure correctly
+    // Icarus: Pin 07 to disable battery charging circuit
+    let mut enable_bat_meas = Output::new(p.P0_25, Level::High, OutputDrive::Standard);
+    // let _disable_charging = Output::new(p.P0_07, Level::High, OutputDrive::Standard);
 
-    // blue LED to power when data is being transmitted on Conexio Stratus
+    // Stratus: Pin 3 for blue LED power when data is being transmitted
+    // Stratus: Pin 12 for blue LED power when data is being transmitted, (red: P_10, green: P_11)
     let mut led = Output::new(p.P0_03, Level::High, OutputDrive::Standard);
-    // Use PWM control to reduce current
-    // let mut led_pwm = SimplePwm::new_1ch(p.PWM0, p.P0_03);
-    // led_pwm.set_prescaler(Prescaler::Div1);
-    // led_pwm.set_max_duty(32767);
-    // led_pwm.set_duty(0,0);
-    // led_pwm.disable();
 
     // Initialize cellular modem
-    // unwrap!(
+    unwrap!(
         nrf_modem::init(SystemMode {
             lte_support: true,
             nbiot_support: false,
             gnss_support: true,
             preference: ConnectionPreference::Lte,
-        }).await?;
-    // );
+        })
+        .await
+    );
 
-    // Initialize modem
+    // Configure GPS settings
     // config_gnss().await?;
 
     // install PSK info for secure cloud connectivity
@@ -117,40 +124,48 @@ async fn run() -> Result<(), Error> {
     // Heapless buffer to hold our sample values before transmitting
     let mut payload = Payload::new();
 
+    // Create our sleep timer (time between sensor measurements)
+    let mut ticker = Ticker::every(Duration::from_secs(15));
+    info!("Entering Loop");
     loop {
         let mut buf = [0; 2];
 
         // get_gnss_data().await?;
-        // Power up the hall sensor: max power on time = 330us
+
+        // Power up the hall sensor: max power on time = 330us (wait for 500us to be safe)
         hall_effect.set_high();
         enable_bat_meas.set_high();
-        Timer::after(Duration::from_micros(500)).await;
 
+        Timer::after(Duration::from_micros(500)).await;
         adc.sample(&mut buf).await;
 
         hall_effect.set_low();
         enable_bat_meas.set_low();
+
+        // Stratus: V_bat measurement multiplier = 200/100
+        // Icarus: V_bat measurement multiplier = 147/100
         info!("Battery: {} ADC", &buf[1]);
-        info!("Battery: {} mV", (((&buf[1] * 2) as u32 * 3600) / 4096));
+        info!(
+            "Battery: {} mV",
+            (((&buf[1] * (200 / 100)) as u32 * 3600) / 4096)
+        );
 
         payload
             .data
             .push(TankLevel::new(
-                convert_to_tank_level(buf[0]), 1987, ((&buf[1] * 2) as u32 * 3600) / 4096 ))
+                convert_to_tank_level(buf[0]),
+                1987,
+                ((&buf[1] * (200 / 100)) as u32 * 3600) / 4096,
+            ))
             .unwrap();
 
         // Our payload data buff is full, send to the cloud, clear the buffer
         if payload.data.is_full() {
-            info!("Transmitting data over CoAP");
-            // for val in &tank_level.data {
-            //     info!("ADC: {}", val);
-            // }
-            // info!("TankLevel: {}", core::mem::size_of::<TankLevel>());
+            info!("TankLevel: {}", core::mem::size_of::<TankLevel>());
+            info!("Payload is full");
 
             // Visibly show that data is being sent
             led.set_low();
-            // led_pwm.set_duty(0,2500);
-            // led_pwm.enable();
 
             // If timeout occurs, log a timeout and continue.
             if let Ok(_) =
@@ -158,6 +173,8 @@ async fn run() -> Result<(), Error> {
                     .await
             {
                 payload.timeouts = 0;
+
+                info!("Transfer Complete");
             } else {
                 payload.timeouts += 1;
                 info!(
@@ -169,10 +186,8 @@ async fn run() -> Result<(), Error> {
             payload.data.clear();
 
             led.set_high();
-            // led_pwm.set_duty(0,0);
-            // led_pwm.disable();
         }
-
+        info!("Ticker next()");
         ticker.next().await; // wait for next tick event
     }
 }
