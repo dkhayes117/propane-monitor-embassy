@@ -2,7 +2,7 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-use defmt::{info, unwrap};
+use defmt::{error, info, unwrap};
 use embassy_executor::Spawner;
 use embassy_nrf::gpio::{Flex, Level, Output, OutputDrive};
 use embassy_nrf::interrupt::{self, InterruptExt, Priority};
@@ -53,7 +53,7 @@ async fn main(_spawner: Spawner) {
         Ok(()) => exit(),
         Err(e) => {
             // If we get here, we have problems
-            info!("app exited: {:?}", defmt::Debug2Format(&e));
+            error!("app exited: {:?}", defmt::Debug2Format(&e));
             exit();
         }
     }
@@ -77,13 +77,13 @@ async fn run() -> Result<(), Error> {
     let sensor_channel = ChannelConfig::single_ended(&mut p.P0_14);
     // Stratus: Pin 20 for V_bat measurement
     // Icarus: Pin 13 for V_bat measurement
-    let bat_channel = ChannelConfig::single_ended(&mut p.P0_20);
+    // let bat_channel = ChannelConfig::single_ended(&mut p.P0_20);
 
     let mut adc = Saadc::new(
         p.SAADC,
         interrupt::take!(SAADC),
         adc_config,
-        [sensor_channel, bat_channel],
+        [sensor_channel /*bat_channel*/],
     );
     adc.calibrate().await;
     info!("ADC Initialized");
@@ -97,7 +97,7 @@ async fn run() -> Result<(), Error> {
 
     // Stratus: Pin 25 to control VBAT_MEAS_EN, Power must connect to V_Bat to measure correctly
     // Icarus: Pin 07 to disable battery charging circuit
-    let mut enable_bat_meas = Output::new(p.P0_25, Level::High, OutputDrive::Standard);
+    // let mut enable_bat_meas = Output::new(p.P0_25, Level::High, OutputDrive::Standard);
     // let _disable_charging = Output::new(p.P0_07, Level::High, OutputDrive::Standard);
 
     // Stratus: Pin 3 for blue LED power when data is being transmitted
@@ -128,26 +128,26 @@ async fn run() -> Result<(), Error> {
     let mut ticker = Ticker::every(Duration::from_secs(15));
     info!("Entering Loop");
     loop {
-        let mut buf = [0; 2];
+        let mut buf = [0; 1];
 
         // get_gnss_data().await?;
 
         // Power up the hall sensor: max power on time = 330us (wait for 500us to be safe)
         hall_effect.set_high();
-        enable_bat_meas.set_high();
+        // enable_bat_meas.set_high();
 
         Timer::after(Duration::from_micros(500)).await;
         adc.sample(&mut buf).await;
 
         hall_effect.set_low();
-        enable_bat_meas.set_low();
+        // enable_bat_meas.set_low();
 
         // Stratus: V_bat measurement multiplier = 200/100
         // Icarus: V_bat measurement multiplier = 147/100
-        info!("Battery: {} ADC", &buf[1]);
+        info!("Battery: {} ADC", &buf[0]);
         info!(
             "Battery: {} mV",
-            (((&buf[1] * (200 / 100)) as u32 * 3600) / 4096)
+            (((&buf[0] * (200 / 100)) as u32 * 3600) / 4096)
         );
 
         payload
@@ -155,7 +155,7 @@ async fn run() -> Result<(), Error> {
             .push(TankLevel::new(
                 convert_to_tank_level(buf[0]),
                 1987,
-                ((&buf[1] * (200 / 100)) as u32 * 3600) / 4096,
+                ((&buf[0] * (200 / 100)) as u32 * 3600) / 4096,
             ))
             .unwrap();
 

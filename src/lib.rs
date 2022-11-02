@@ -12,17 +12,16 @@ use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::{info, Debug2Format, Format};
 use embassy_nrf as _;
-use embassy_time::{Duration, TimeoutError, Timer};
+use embassy_time::TimeoutError;
 use heapless::{String, Vec};
 use nrf_modem::dtls_socket::{DtlsSocket, PeerVerification};
-use nrf_modem::lte_link::LteLink;
 use serde::Serialize;
 use {defmt_rtt as _, panic_probe as _};
 
 extern crate alloc;
 extern crate tinyrlibc;
 
-pub mod config;
+mod config;
 
 /// Credential Storage Management Types
 #[derive(Clone, Copy, Format)]
@@ -137,10 +136,11 @@ pub async fn get_gnss_data() -> Result<(), Error> {
 /// Create CoAP request, serialize payload, and transimt data
 /// request path can start with .s/ for LightDB Stream or .d/ LightDB State for Golioth IoT
 pub async fn transmit_payload(payload: &mut Payload<'_>) -> Result<(), Error> {
-    // Establish an LTE link
-    let link = LteLink::new().await?;
-
-    link.wait_for_link().await?;
+    // Create our DTLS socket
+    let mut socket = DtlsSocket::new(PeerVerification::Enabled, &[SECURITY_TAG]).await?;
+    info!("DTLS Socket created");
+    socket.connect(SERVER_URL, SERVER_PORT).await?;
+    info!("DTLS Socket connected");
 
     let sig_strength = get_signal_strength().await?;
     payload.signal = sig_strength;
@@ -158,19 +158,13 @@ pub async fn transmit_payload(payload: &mut Payload<'_>) -> Result<(), Error> {
     // info!("JSON Byte Vec: {:?}", Debug2Format(&json));
     request.message.payload = json;
 
-    // Create our DTLS socket
-    let mut socket = DtlsSocket::new(PeerVerification::Enabled, &[SECURITY_TAG]).await?;
-    info!("DTLS Socket created");
-    socket.connect(SERVER_URL, SERVER_PORT).await?;
-    info!("DTLS Socket connected");
     socket.send(&request.message.to_bytes()?).await?;
     info!("Payload done");
 
     // The sockets would be dropped after the function call ends, but this explicit call allows them
     // to be dropped asynchronously
-    info!("deactivate sockets");
+    info!("deactivate socket");
     socket.deactivate().await?;
-    link.deactivate().await?;
 
     Ok(())
 }
