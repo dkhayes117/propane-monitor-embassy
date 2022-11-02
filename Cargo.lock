@@ -965,7 +965,7 @@ dependencies = [
 
 [[package]]
 name = "propane_monitor_embassy"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "alloc-cortex-m",
  "at-commands",
