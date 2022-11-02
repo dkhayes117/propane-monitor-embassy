@@ -2,6 +2,14 @@
 #![no_std]
 #![feature(alloc_error_handler)]
 
+extern crate alloc;
+extern crate tinyrlibc;
+
+mod config;
+pub mod psk;
+mod at;
+mod gnss;
+
 use crate::config::{SECURITY_TAG, SERVER_PORT, SERVER_URL};
 use alloc_cortex_m::CortexMHeap;
 use at_commands::parser::ParseError;
@@ -16,16 +24,7 @@ use heapless::{Vec};
 use nrf_modem::dtls_socket::{DtlsSocket, PeerVerification};
 use serde::Serialize;
 use {defmt_rtt as _, panic_probe as _};
-
-mod config;
-pub mod psk;
-mod at;
-mod gnss;
-
 use crate::at::*;
-
-extern crate alloc;
-extern crate tinyrlibc;
 
 /// Crate error types
 #[derive(Debug)]

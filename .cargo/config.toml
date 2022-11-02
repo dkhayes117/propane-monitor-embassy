@@ -11,5 +11,5 @@ DEFMT_LOG = "trace"
 [alias]
 rb = "run --bin"
 rrb = "run --release --bin"
-s = "cargo size --bin app -- -A -x"
-sr = "cargo size --release --bin app -- -A -x"
+s = "size --bin app -- -A -x"
+sr = "size --release --bin app -- -A -x"
