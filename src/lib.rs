@@ -2,38 +2,30 @@
 #![no_std]
 #![feature(alloc_error_handler)]
 
-use crate::config::{PSK, PSK_ID, SECURITY_TAG, SERVER_PORT, SERVER_URL};
+use crate::config::{SECURITY_TAG, SERVER_PORT, SERVER_URL};
 use alloc_cortex_m::CortexMHeap;
-use at_commands::parser::{CommandParser, ParseError};
+use at_commands::parser::ParseError;
 use coap_lite::error::MessageError;
 use coap_lite::{CoapRequest, ContentFormat, RequestType};
-use core::fmt::write;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
-use defmt::{info, Debug2Format, Format};
+use defmt::{info};
 use embassy_nrf as _;
 use embassy_time::TimeoutError;
-use heapless::{String, Vec};
+use heapless::{Vec};
 use nrf_modem::dtls_socket::{DtlsSocket, PeerVerification};
 use serde::Serialize;
 use {defmt_rtt as _, panic_probe as _};
 
+mod config;
+pub mod psk;
+mod at;
+mod gnss;
+
+use crate::at::*;
+
 extern crate alloc;
 extern crate tinyrlibc;
-
-mod config;
-
-/// Credential Storage Management Types
-#[derive(Clone, Copy, Format)]
-#[allow(dead_code)]
-enum CSMType {
-    RootCert = 0,
-    ClientCert = 1,
-    ClientPrivateKey = 2,
-    Psk = 3,
-    PskId = 4,
-    // ...
-}
 
 /// Crate error types
 #[derive(Debug)]
@@ -84,6 +76,7 @@ pub struct Payload<'a> {
     location: &'a str,
 }
 
+/// Payload constructor
 impl Payload<'_> {
     pub fn new() -> Self {
         Payload {
@@ -103,6 +96,7 @@ pub struct TankLevel {
     pub battery: u32,
 }
 
+/// TankLevel constructor
 impl TankLevel {
     pub fn new(value: u8, timestamp: u32, battery: u32) -> Self {
         TankLevel {
@@ -111,26 +105,6 @@ impl TankLevel {
             battery,
         }
     }
-}
-
-pub async fn config_gnss() -> Result<(), Error> {
-    // confgiure MAGPIO pins for GNSS
-    info!("Configuring XMAGPIO pins for 1574-1577 MHz");
-    nrf_modem::at::send_at::<0>("AT%XMAGPIO=1,0,0,1,1,1574,1577").await?;
-    nrf_modem::at::send_at::<0>("AT%XCOEXO=1,1,1574,1577").await?;
-    Ok(())
-}
-
-/// Function to retrieve GPS data from a single GNSS fix
-pub async fn get_gnss_data() -> Result<(), Error> {
-    let mut gnss = nrf_modem::gnss::Gnss::new().await?;
-    let config = nrf_modem::gnss::GnssConfig::default();
-    let mut iter = gnss.start_single_fix(config)?;
-
-    if let Some(x) = futures::StreamExt::next(&mut iter).await {
-        info!("{:?}", Debug2Format(&x.unwrap()));
-    }
-    Ok(())
 }
 
 /// Create CoAP request, serialize payload, and transimt data
@@ -168,67 +142,6 @@ pub async fn transmit_payload(payload: &mut Payload<'_>) -> Result<(), Error> {
 
     Ok(())
 }
-// }
-
-/// This function deletes a key or certificate from the nrf modem
-async fn key_delete(ty: CSMType) -> Result<(), Error> {
-    let mut cmd: String<32> = String::new();
-    write(
-        &mut cmd,
-        format_args!("AT%CMNG=3,{},{}", SECURITY_TAG, ty as u32),
-    )
-    .unwrap();
-    nrf_modem::at::send_at::<32>(cmd.as_str()).await?;
-    Ok(())
-}
-
-/// This function writes a key or certificate to the nrf modem
-async fn key_write(ty: CSMType, data: &str) -> Result<(), Error> {
-    let mut cmd: String<128> = String::new();
-    write(
-        &mut cmd,
-        format_args!(r#"AT%CMNG=0,{},{},"{}""#, SECURITY_TAG, ty as u32, data),
-    )
-    .unwrap();
-
-    nrf_modem::at::send_at::<128>(&cmd.as_str()).await?;
-
-    Ok(())
-}
-
-/// Delete existing keys/certificates and loads new ones based on config.rs entries
-pub async fn install_psk_id_and_psk() -> Result<(), Error> {
-    assert!(
-        !&PSK_ID.is_empty() && !&PSK.is_empty(),
-        "PSK ID and PSK must not be empty. Set them in the `config` module."
-    );
-
-    key_delete(CSMType::PskId).await?;
-    key_delete(CSMType::Psk).await?;
-
-    key_write(CSMType::PskId, &PSK_ID).await?;
-    key_write(CSMType::Psk, &encode_psk_as_hex(&PSK)).await?;
-
-    Ok(())
-}
-
-fn encode_psk_as_hex(psk: &[u8]) -> String<128> {
-    fn hex_from_digit(num: u8) -> char {
-        if num < 10 {
-            (b'0' + num) as char
-        } else {
-            (b'a' + num - 10) as char
-        }
-    }
-
-    let mut s: String<128> = String::new();
-    for ch in psk {
-        s.push(hex_from_digit(ch / 16)).unwrap();
-        s.push(hex_from_digit(ch % 16)).unwrap();
-    }
-
-    s
-}
 
 /// Convert sensor ADC value into tank level percentage
 pub fn convert_to_tank_level(x: i16) -> u8 {
@@ -240,28 +153,6 @@ pub fn convert_to_tank_level(x: i16) -> u8 {
     } else {
         val
     }
-}
-
-/// Parse AT+CESQ command response and return a signal strength in dBm
-/// Signal strength = -140 dBm + last int_parameter
-async fn get_signal_strength() -> Result<i32, Error> {
-    let command = nrf_modem::at::send_at::<32>("AT+CESQ").await?;
-
-    let (_, _, _, _, _, mut signal) = CommandParser::parse(command.as_bytes())
-        .expect_identifier(b"+CESQ:")
-        .expect_int_parameter()
-        .expect_int_parameter()
-        .expect_int_parameter()
-        .expect_int_parameter()
-        .expect_int_parameter()
-        .expect_int_parameter()
-        .expect_identifier(b"\r\n")
-        .finish()
-        .unwrap();
-    if signal != 255 {
-        signal += -140;
-    }
-    Ok(signal)
 }
 
 /// Terminates the application and makes `probe-run` exit with exit-code = 0

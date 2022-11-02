@@ -13,6 +13,7 @@ use embassy_time::{Duration, Ticker, Timer};
 use futures::StreamExt;
 use nrf_modem::{ConnectionPreference, SystemMode};
 use propane_monitor_embassy::*;
+use propane_monitor_embassy::psk::install_psk_id_and_psk;
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
