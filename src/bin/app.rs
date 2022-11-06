@@ -6,10 +6,10 @@ use defmt::{error, info, unwrap};
 use embassy_executor::Spawner;
 use embassy_nrf::gpio::{Flex, Level, Output, OutputDrive};
 use embassy_nrf::interrupt::{self, InterruptExt, Priority};
-use embassy_nrf::pac::{REGULATORS, UARTE0, UARTE1};
+use embassy_nrf::pac::{UARTE0, UARTE1};
 // use embassy_nrf::pwm::{Prescaler, SimplePwm};
 use embassy_nrf::saadc::{ChannelConfig, Config, Saadc};
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Duration, Ticker, Timer, with_timeout};
 use futures::StreamExt;
 use nrf_modem::{ConnectionPreference, SystemMode};
 use propane_monitor_embassy::*;
@@ -34,12 +34,6 @@ async fn main(_spawner: Spawner) {
     });
     ipc.enable();
 
-    // dcdcen must be enabled before the modem is started, not after
-    // Enabling DCDC mode will allow modem to automatically switch between DCDC mode and LDO
-    // mode for greatest power efficiency
-    let regulators: REGULATORS = unsafe { core::mem::transmute(()) };
-    regulators.dcdcen.modify(|_, w| w.dcdcen().enabled());
-
     // // Disable UARTE for lower power consumption
     let uarte0: UARTE0 = unsafe { core::mem::transmute(()) };
     let uarte1: UARTE1 = unsafe { core::mem::transmute(()) };
@@ -51,7 +45,7 @@ async fn main(_spawner: Spawner) {
 
     // Run our sampling program, will not return unless an error occurs
     match run().await {
-        Ok(()) => exit(),
+        Ok(()) => unreachable!(),
         Err(e) => {
             // If we get here, we have problems
             error!("app exited: {:?}", defmt::Debug2Format(&e));
@@ -64,9 +58,7 @@ async fn run() -> Result<(), Error> {
     // Handle for device peripherals
     let mut p = embassy_nrf::init(Default::default());
 
-    // Stratus: Disable on-board sensors for low power
-    // Flex::new(&mut p.P0_25).set_as_disconnected();
-    // Flex::new(&mut p.P0_28).set_as_disconnected();
+    // Stratus: Disconnect accelerometer for power savings
     Flex::new(&mut p.P0_29).set_as_disconnected();
 
     // Configuration of ADC, over sample to reduce noise (8x)
@@ -78,13 +70,13 @@ async fn run() -> Result<(), Error> {
     let sensor_channel = ChannelConfig::single_ended(&mut p.P0_14);
     // Stratus: Pin 20 for V_bat measurement
     // Icarus: Pin 13 for V_bat measurement
-    // let bat_channel = ChannelConfig::single_ended(&mut p.P0_20);
+    let bat_channel = ChannelConfig::single_ended(&mut p.P0_20);
 
     let mut adc = Saadc::new(
         p.SAADC,
         interrupt::take!(SAADC),
         adc_config,
-        [sensor_channel /*bat_channel*/],
+        [sensor_channel, bat_channel],
     );
     adc.calibrate().await;
     info!("ADC Initialized");
@@ -98,7 +90,7 @@ async fn run() -> Result<(), Error> {
 
     // Stratus: Pin 25 to control VBAT_MEAS_EN, Power must connect to V_Bat to measure correctly
     // Icarus: Pin 07 to disable battery charging circuit
-    // let mut enable_bat_meas = Output::new(p.P0_25, Level::High, OutputDrive::Standard);
+    let mut enable_bat_meas = Output::new(p.P0_25, Level::Low, OutputDrive::Standard);
     // let _disable_charging = Output::new(p.P0_07, Level::High, OutputDrive::Standard);
 
     // Stratus: Pin 3 for blue LED power when data is being transmitted
@@ -129,26 +121,24 @@ async fn run() -> Result<(), Error> {
     let mut ticker = Ticker::every(Duration::from_secs(15));
     info!("Entering Loop");
     loop {
-        let mut buf = [0; 1];
+        let mut buf = [0; 2];
 
         // get_gnss_data().await?;
 
         // Power up the hall sensor: max power on time = 330us (wait for 500us to be safe)
         hall_effect.set_high();
-        // enable_bat_meas.set_high();
+        enable_bat_meas.set_high();
 
         Timer::after(Duration::from_micros(500)).await;
         adc.sample(&mut buf).await;
 
         hall_effect.set_low();
-        // enable_bat_meas.set_low();
+        enable_bat_meas.set_low();
 
-        // Stratus: V_bat measurement multiplier = 200/100
-        // Icarus: V_bat measurement multiplier = 147/100
-        info!("Battery: {} ADC", &buf[0]);
         info!(
-            "Battery: {} mV",
-            (((&buf[0] * (200 / 100)) as u32 * 3600) / 4096)
+            "Tank level: {}%, Battery: {} mV",
+            convert_to_tank_level(buf[0]),
+            convert_to_mv(buf[1])
         );
 
         payload
@@ -156,13 +146,13 @@ async fn run() -> Result<(), Error> {
             .push(TankLevel::new(
                 convert_to_tank_level(buf[0]),
                 1987,
-                ((&buf[0] * (200 / 100)) as u32 * 3600) / 4096,
+                convert_to_mv(buf[1]),
             ))
             .unwrap();
 
         // Our payload data buff is full, send to the cloud, clear the buffer
         if payload.data.is_full() {
-            info!("TankLevel: {}", core::mem::size_of::<TankLevel>());
+            // info!("TankLevel: {}", core::mem::size_of::<TankLevel>());
             info!("Payload is full");
 
             // Visibly show that data is being sent
@@ -170,7 +160,7 @@ async fn run() -> Result<(), Error> {
 
             // If timeout occurs, log a timeout and continue.
             if let Ok(_) =
-                embassy_time::with_timeout(Duration::from_secs(30), transmit_payload(&mut payload))
+                with_timeout(Duration::from_secs(30), transmit_payload(&mut payload))
                     .await
             {
                 payload.timeouts = 0;

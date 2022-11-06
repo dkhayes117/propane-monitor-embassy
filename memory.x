@@ -7,7 +7,7 @@ MEMORY
     RAM                      : ORIGIN = 0x20018000, LENGTH = 160K
 }
 
-/* This is commented out after first flash, so we don't have to flash it over and over*/
+/* This is commented out after first flash, so we don't have to flash it over and over
 SECTIONS
 {
   .spm :
@@ -15,3 +15,4 @@ SECTIONS
     KEEP(*(.spm .spm.*));
   } > SPM
 }
+*/

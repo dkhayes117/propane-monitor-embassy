@@ -26,8 +26,8 @@ use serde::Serialize;
 use {defmt_rtt as _, panic_probe as _};
 use crate::at::*;
 
-/// Once flashed, comment this out along with the entry in memory.x to eliminate flashing the SPM
-/// more than once, and will speed up subsequent builds.
+/// Once flashed, comment this out along with the SPM entry in memory.x to eliminate flashing the SPM
+/// more than once, and will speed up subsequent builds.  Or leave it and flash it every time
 // #[link_section = ".spm"]
 // #[used]
 // static SPM: [u8; 24052] = *include_bytes!("zephyr.bin");
@@ -75,7 +75,7 @@ impl From<ParseError> for Error {
 /// Payload to send over CoAP (Heapless Vec of Tanklevel Structs)
 #[derive(Debug, Serialize)]
 pub struct Payload<'a> {
-    pub data: Vec<TankLevel, 2>,
+    pub data: Vec<TankLevel, 6>,
     pub signal: i32,
     pub timeouts: u8,
     location: &'a str,
@@ -88,7 +88,7 @@ impl Payload<'_> {
             data: Vec::new(),
             signal: 0,
             timeouts: 0,
-            location: "Lowes2",
+            location: "Lowes3",
         }
     }
 }
@@ -96,14 +96,14 @@ impl Payload<'_> {
 /// Structure to hold our individual measure data
 #[derive(Debug, Serialize)]
 pub struct TankLevel {
-    pub value: u8,
+    pub value: u32,
     pub timestamp: u32,
     pub battery: u32,
 }
 
 /// TankLevel constructor
 impl TankLevel {
-    pub fn new(value: u8, timestamp: u32, battery: u32) -> Self {
+    pub fn new(value: u32, timestamp: u32, battery: u32) -> Self {
         TankLevel {
             value,
             timestamp,
@@ -149,8 +149,9 @@ pub async fn transmit_payload(payload: &mut Payload<'_>) -> Result<(), Error> {
 }
 
 /// Convert sensor ADC value into tank level percentage
-pub fn convert_to_tank_level(x: i16) -> u8 {
-    let val = ((0.0529 * x as f32) - 38.6794) as u8;
+pub fn convert_to_tank_level(x: i16) -> u32 {
+    let val = ((534 * x as u32) - 39_0634) / 10000;
+    info!("Tank Level: {}", &val);
     if val > 100 {
         100
     } else if val < 10 {
@@ -158,6 +159,13 @@ pub fn convert_to_tank_level(x: i16) -> u8 {
     } else {
         val
     }
+}
+
+/// Convert ADC value into a milli-volt battery measurement
+pub fn convert_to_mv(x: i16) -> u32 {
+    // Stratus: V_bat measurement multiplier = 200/100
+    // Icarus: V_bat measurement multiplier = 147/100
+    ((x * (200 / 100)) as u32 * 3600) / 4096
 }
 
 /// Terminates the application and makes `probe-run` exit with exit-code = 0

@@ -27,6 +27,9 @@ async fn main(_spawner: Spawner) {
         [channel_config],
     );
 
+    adc.calibrate().await;
+    info!("ADC Initialized");
+
     let _hall_effect = Output::new(p.P0_31, Level::High, OutputDrive::Disconnect0HighDrive1);
 
     let mut buf = [0; 1];
@@ -58,13 +61,30 @@ async fn main(_spawner: Spawner) {
 
     Timer::after(Duration::from_millis(5000)).await;
 
-    for (level, duty) in positions.iter() {
-        // poor mans inverting, subtract our value from max_duty
-        pwm.set_duty(0, 2500 - *duty);
-        Timer::after(Duration::from_millis(3000)).await;
+    for _ in 1..11 {
+        for (level, duty) in positions.iter() {
+            // poor mans inverting, subtract our value from max_duty
+            pwm.set_duty(0, 2500 - *duty);
+            Timer::after(Duration::from_millis(3000)).await;
 
-        adc.sample(&mut buf).await;
-        info!("Gauge Level: {}%, adc: {=i16}", level, &buf[0]);
+            adc.sample(&mut buf).await;
+            info!("Gauge Level: {}%, adc: {=i16}, conversion: {=u32}"
+                , level, &buf[0], convert_to_tank_level(buf[0])
+            );
+        }
     }
     propane_monitor_embassy::exit();
+}
+
+/// Convert sensor ADC value into tank level percentage
+fn convert_to_tank_level(x: i16) -> u32 {
+    let val = ((534 * x as u32) - 39_0634) / 10000;
+    info!("Tank Level: {}", &val);
+    if val > 100 {
+        100
+    } else if val < 10 {
+        10
+    } else {
+        val
+    }
 }

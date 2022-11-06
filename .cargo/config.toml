@@ -6,10 +6,10 @@ runner = "probe-run --chip nRF9160_xxAA"
 target = "thumbv8m.main-none-eabihf" # Cortex-M33 (with FPU)
 
 [env]
-DEFMT_LOG = "trace"
+DEFMT_LOG = "debug"
 
 [alias]
 rb = "run --bin"
 rrb = "run --release --bin"
-s = "size --bin app -- -A -x"
-sr = "size --release --bin app -- -A -x"
+s = "size --bin app -- -B -x"
+sr = "size --release --bin app -- -B -x"
