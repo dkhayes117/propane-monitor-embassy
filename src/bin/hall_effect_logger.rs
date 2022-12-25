@@ -68,8 +68,11 @@ async fn main(_spawner: Spawner) {
             Timer::after(Duration::from_millis(3000)).await;
 
             adc.sample(&mut buf).await;
-            info!("Gauge Level: {}%, adc: {=i16}, conversion: {=u32}"
-                , level, &buf[0], convert_to_tank_level(buf[0])
+            info!(
+                "Gauge Level: {}%, adc: {=i16}, conversion: {=u32}",
+                level,
+                &buf[0],
+                convert_to_tank_level(buf[0])
             );
         }
     }

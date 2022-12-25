@@ -1,8 +1,8 @@
+use crate::config::{PSK, PSK_ID, SECURITY_TAG};
+use crate::Error;
 use core::fmt::write;
 use defmt::Format;
 use heapless::String;
-use crate::Error;
-use crate::config::{PSK, PSK_ID, SECURITY_TAG};
 
 /// Credential Storage Management Types
 #[derive(Clone, Copy, Format)]
@@ -23,8 +23,8 @@ async fn key_delete(ty: CSMType) -> Result<(), Error> {
         &mut cmd,
         format_args!("AT%CMNG=3,{},{}", SECURITY_TAG, ty as u32),
     )
-        .unwrap();
-    nrf_modem::at::send_at::<32>(cmd.as_str()).await?;
+    .unwrap();
+    nrf_modem::send_at::<32>(cmd.as_str()).await?;
     Ok(())
 }
 
@@ -35,9 +35,9 @@ async fn key_write(ty: CSMType, data: &str) -> Result<(), Error> {
         &mut cmd,
         format_args!(r#"AT%CMNG=0,{},{},"{}""#, SECURITY_TAG, ty as u32, data),
     )
-        .unwrap();
+    .unwrap();
 
-    nrf_modem::at::send_at::<128>(&cmd.as_str()).await?;
+    nrf_modem::send_at::<128>(&cmd.as_str()).await?;
 
     Ok(())
 }

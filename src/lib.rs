@@ -5,11 +5,12 @@
 extern crate alloc;
 extern crate tinyrlibc;
 
-mod config;
-pub mod psk;
 mod at;
+mod config;
 mod gnss;
+pub mod psk;
 
+use crate::at::*;
 use crate::config::{SECURITY_TAG, SERVER_PORT, SERVER_URL};
 use alloc_cortex_m::CortexMHeap;
 use at_commands::parser::ParseError;
@@ -17,14 +18,13 @@ use coap_lite::error::MessageError;
 use coap_lite::{CoapRequest, ContentFormat, RequestType};
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
-use defmt::{info};
+use defmt::info;
 use embassy_nrf as _;
 use embassy_time::TimeoutError;
-use heapless::{Vec};
-use nrf_modem::dtls_socket::{DtlsSocket, PeerVerification};
+use heapless::Vec;
+use nrf_modem::{DtlsSocket, PeerVerification};
 use serde::Serialize;
 use {defmt_rtt as _, panic_probe as _};
-use crate::at::*;
 
 /// Once flashed, comment this out along with the SPM entry in memory.x to eliminate flashing the SPM
 /// more than once, and will speed up subsequent builds.  Or leave it and flash it every time
@@ -37,7 +37,7 @@ use crate::at::*;
 pub enum Error {
     Coap(MessageError),
     Json(serde_json::error::Error),
-    NrfModem(nrf_modem::error::Error),
+    NrfModem(nrf_modem::Error),
     Timeout(TimeoutError),
     ParseError(ParseError),
 }
@@ -54,8 +54,8 @@ impl From<serde_json::error::Error> for Error {
     }
 }
 
-impl From<nrf_modem::error::Error> for Error {
-    fn from(e: nrf_modem::error::Error) -> Self {
+impl From<nrf_modem::Error> for Error {
+    fn from(e: nrf_modem::Error) -> Self {
         Self::NrfModem(e)
     }
 }
@@ -77,6 +77,7 @@ impl From<ParseError> for Error {
 pub struct Payload<'a> {
     pub data: Vec<TankLevel, 6>,
     pub signal: i32,
+    pub message: u8,
     pub timeouts: u8,
     location: &'a str,
 }
@@ -87,8 +88,9 @@ impl Payload<'_> {
         Payload {
             data: Vec::new(),
             signal: 0,
+            message: 0,
             timeouts: 0,
-            location: "Lowes3",
+            location: "Reliability Test 3",
         }
     }
 }
@@ -116,9 +118,13 @@ impl TankLevel {
 /// request path can start with .s/ for LightDB Stream or .d/ LightDB State for Golioth IoT
 pub async fn transmit_payload(payload: &mut Payload<'_>) -> Result<(), Error> {
     // Create our DTLS socket
-    let mut socket = DtlsSocket::new(PeerVerification::Enabled, &[SECURITY_TAG]).await?;
-    info!("DTLS Socket created");
-    socket.connect(SERVER_URL, SERVER_PORT).await?;
+    let socket = DtlsSocket::connect(
+        SERVER_URL,
+        SERVER_PORT,
+        PeerVerification::Enabled,
+        &[SECURITY_TAG],
+    )
+    .await?;
     info!("DTLS Socket connected");
 
     let sig_strength = get_signal_strength().await?;
@@ -151,7 +157,7 @@ pub async fn transmit_payload(payload: &mut Payload<'_>) -> Result<(), Error> {
 /// Convert sensor ADC value into tank level percentage
 pub fn convert_to_tank_level(x: i16) -> u32 {
     let val = ((534 * x as u32) - 39_0634) / 10000;
-    info!("Tank Level: {}", &val);
+    // info!("Tank Level: {}", &val);
     if val > 100 {
         100
     } else if val < 10 {

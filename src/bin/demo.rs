@@ -7,7 +7,7 @@ use embassy_executor::Spawner;
 use embassy_nrf::gpio::{Flex, Level, Output, OutputDrive};
 use embassy_nrf::interrupt::{self, InterruptExt, Priority};
 use embassy_nrf::pac::{UARTE0, UARTE1};
-// use embassy_nrf::pwm::{Prescaler, SimplePwm};
+use embassy_nrf::pwm::{Prescaler, SimplePwm};
 use embassy_nrf::saadc::{ChannelConfig, Config, Saadc};
 use embassy_time::{with_timeout, Duration, Ticker, Timer};
 use futures::StreamExt;
@@ -61,6 +61,12 @@ async fn run() -> Result<(), Error> {
     // Stratus: Disconnect accelerometer for power savings
     Flex::new(&mut p.P0_29).set_as_disconnected();
 
+    // Demo PWM servo control
+    let mut pwm = SimplePwm::new_1ch(p.PWM0, p.P0_10);
+    pwm.set_prescaler(Prescaler::Div128);
+    pwm.set_max_duty(2500);
+    info!("pwm initialized!");
+
     // Configuration of ADC, over sample to reduce noise (8x)
     let adc_config = Config::default();
     // Oversample can only be used when you have a single channel
@@ -103,7 +109,7 @@ async fn run() -> Result<(), Error> {
         nrf_modem::init(SystemMode {
             lte_support: true,
             lte_psm_support: true,
-            nbiot_support: true,
+            nbiot_support: false,
             gnss_support: false,
             preference: ConnectionPreference::Lte,
         })
@@ -120,70 +126,84 @@ async fn run() -> Result<(), Error> {
     let mut payload = Payload::new();
 
     // Create our sleep timer (time between sensor measurements)
-    let mut ticker = Ticker::every(Duration::from_secs(3));
+    let mut ticker = Ticker::every(Duration::from_secs(5));
     info!("Entering Loop");
     loop {
-        let mut timeout = 30;
-        if payload.message == 0 {
-            timeout = 1800;
-        }
-        let mut buf = [0; 2];
+        let positions: [(u16, u16); 6] = [
+            // (90, 250),
+            // (85, 244),
+            // (80, 234),
+            // (70, 217),
+            (60, 203),
+            (50, 189),
+            (40, 176),
+            (30, 162),
+            (25, 154),
+            (20, 144),
+            // (15, 134),
+        ];
+        for (_level, duty) in positions.iter() {
+            pwm.set_duty(0, 2500 - *duty);
+            Timer::after(Duration::from_millis(500)).await;
 
-        // get_gnss_data().await?;
+            let mut buf = [0; 2];
 
-        // Power up the hall sensor: max power on time = 330us (wait for 500us to be safe)
-        hall_effect.set_high();
-        enable_bat_meas.set_high();
+            // get_gnss_data().await?;
 
-        Timer::after(Duration::from_micros(500)).await;
-        adc.sample(&mut buf).await;
+            // Power up the hall sensor: max power on time = 330us (wait for 500us to be safe)
+            hall_effect.set_high();
+            enable_bat_meas.set_high();
 
-        hall_effect.set_low();
-        enable_bat_meas.set_low();
+            Timer::after(Duration::from_micros(500)).await;
+            adc.sample(&mut buf).await;
 
-        info!(
-            "Tank level: {}%, Battery: {} mV",
-            convert_to_tank_level(buf[0]),
-            convert_to_mv(buf[buf.len() - 1])
-        );
+            hall_effect.set_low();
+            enable_bat_meas.set_low();
 
-        payload
-            .data
-            .push(TankLevel::new(
+            info!(
+                "Tank level: {}%, Battery: {} mV",
                 convert_to_tank_level(buf[0]),
-                1987,
-                convert_to_mv(buf[buf.len() - 1]),
-            ))
-            .unwrap();
+                convert_to_mv(buf[buf.len() - 1])
+            );
 
-        // Our payload data buff is full, send to the cloud, clear the buffer
-        if payload.data.is_full() {
-            // info!("TankLevel: {}", core::mem::size_of::<TankLevel>());
-            info!("Payload is full");
-            payload.message += 1;
-            // Visibly show that data is being sent
-            led.set_low();
+            payload
+                .data
+                .push(TankLevel::new(
+                    convert_to_tank_level(buf[0]),
+                    1987,
+                    convert_to_mv(buf[buf.len() - 1]),
+                ))
+                .unwrap();
 
-            // If timeout occurs, log a timeout and continue.
-            if let Ok(_) =
-                with_timeout(Duration::from_secs(timeout), transmit_payload(&mut payload)).await
-            {
-                payload.timeouts = 0;
+            // Our payload data buff is full, send to the cloud, clear the buffer
+            if payload.data.is_full() {
+                // info!("TankLevel: {}", core::mem::size_of::<TankLevel>());
+                info!("Payload is full");
 
-                info!("Transfer Complete");
-            } else {
-                payload.timeouts += 1;
-                info!(
-                    "Timeout has occurred {} time(s), data clear and start over",
-                    payload.timeouts
-                );
+                // Visibly show that data is being sent
+                led.set_low();
+
+                // If timeout occurs, log a timeout and continue.
+                if let Ok(_) =
+                    with_timeout(Duration::from_secs(180), transmit_payload(&mut payload)).await
+                {
+                    payload.timeouts = 0;
+
+                    info!("Transfer Complete");
+                } else {
+                    payload.timeouts += 1;
+                    info!(
+                        "Timeout has occurred {} time(s), data clear and start over",
+                        payload.timeouts
+                    );
+                }
+
+                payload.data.clear();
+
+                led.set_high();
             }
-
-            payload.data.clear();
-
-            led.set_high();
+            info!("Ticker next()");
+            ticker.next().await; // wait for next tick event
         }
-        info!("Ticker next()");
-        ticker.next().await; // wait for next tick event
     }
 }

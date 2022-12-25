@@ -1,4 +1,0 @@
-[toolchain]
-# This is the nightly compiler used, changing this can cause build failure
-channel = "nightly-2022-09-22"
-targets = ["thumbv8m.main-none-eabihf"]
