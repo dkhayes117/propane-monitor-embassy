@@ -28,9 +28,9 @@ use {defmt_rtt as _, panic_probe as _};
 
 /// Once flashed, comment this out along with the SPM entry in memory.x to eliminate flashing the SPM
 /// more than once, and will speed up subsequent builds.  Or leave it and flash it every time
-// #[link_section = ".spm"]
-// #[used]
-// static SPM: [u8; 24052] = *include_bytes!("zephyr.bin");
+#[link_section = ".spm"]
+#[used]
+static SPM: [u8; 24052] = *include_bytes!("zephyr.bin");
 
 /// Crate error types
 #[derive(Debug)]

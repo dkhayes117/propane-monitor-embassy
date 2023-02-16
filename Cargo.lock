@@ -13,12 +13,12 @@ dependencies = [
 
 [[package]]
 name = "alloc-cortex-m"
-version = "0.4.2"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5069e21ec61f3b243a4a4c56d920d3206e6ee86022a67c23e9fe36eb60fc1efd"
+checksum = "483c3bd0f9a7bb982b72988f5f173d29687c432d8013c1d3232635e6c0f0a60c"
 dependencies = [
  "cortex-m",
- "linked_list_allocator 0.8.11",
+ "linked_list_allocator",
 ]
 
 [[package]]
@@ -173,9 +173,9 @@ checksum = "31c0436bd40ab15b2eb784eb90baf5b72651fff5977dc03259ab5c1b05fdf1c5"
 
 [[package]]
 name = "cortex-m"
-version = "0.7.6"
+version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70858629a458fdfd39f9675c4dc309411f2a3f83bede76988d81bf1a0ecee9e0"
+checksum = "8ec610d8f49840a5b376c69663b6369e71f4b34484b9b2eb29fb918d92516cb9"
 dependencies = [
  "bare-metal 0.2.5",
  "bitfield",
@@ -186,9 +186,9 @@ dependencies = [
 
 [[package]]
 name = "cortex-m-rt"
-version = "0.7.2"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6d3328b8b5534f0c90acd66b68950f2763b37e0173cac4d8b4937c4a80761f9"
+checksum = "ee84e813d593101b1723e13ec38b6ab6abbdbaaa4546553f5395ed274079ddb1"
 dependencies = [
  "cortex-m-rt-macros",
 ]
@@ -294,11 +294,11 @@ checksum = "0db23d29972d99baa3de2ee2ae3f104c10564a6d05a346eb3f4c4f2c0525a06e"
 
 [[package]]
 name = "defmt-rtt"
-version = "0.3.2"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d2cbbbd58847d508d97629b32cd9730a2d28532f71e219714614406029f18b1"
+checksum = "609923761264dd99ed9c7d209718cda4631c5fe84668e0f0960124cbb844c49f"
 dependencies = [
- "critical-section 0.2.7",
+ "critical-section 1.1.0",
  "defmt",
 ]
 
@@ -662,15 +662,9 @@ dependencies = [
 
 [[package]]
 name = "linked_list_allocator"
-version = "0.8.11"
+version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "822add9edb1860698b79522510da17bef885171f75aa395cff099d770c609c24"
-
-[[package]]
-name = "linked_list_allocator"
-version = "0.10.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e8da0e6283aace40e4e0395fe5ad7a147fac6ff47bda1f038b5044fb11683c2"
+checksum = "e322f259d225fbae43a1b053b2dc6a5968a6bdf8b205f5de684dab485b95030e"
 dependencies = [
  "spinning_top",
 ]
@@ -739,9 +733,9 @@ dependencies = [
 
 [[package]]
 name = "nrf-modem"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8632d458c7fe13d4877635b7ae60c06916425de871a9b725cd86c03697c880e"
+checksum = "93b539430de4c54e21de34072970a359f28dfe9f8c3f86e86be65d7fe09c2fdd"
 dependencies = [
  "arrayvec",
  "at-commands",
@@ -750,7 +744,7 @@ dependencies = [
  "defmt",
  "embedded-io",
  "futures",
- "linked_list_allocator 0.10.3",
+ "linked_list_allocator",
  "no-std-net",
  "nrf9160-pac",
  "nrfxlib-sys",
